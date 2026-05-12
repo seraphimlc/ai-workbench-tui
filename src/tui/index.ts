@@ -1,6 +1,10 @@
 import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 
+import YAML from "yaml";
+
+import type { RunHistory, TaskQueue, WorkflowTodo } from "../shared/types.js";
+
 export interface TuiShellState {
   discussion: string[] | string;
   specTodo: string[] | string;
@@ -25,9 +29,14 @@ export interface TuiIterationDashboard {
 export interface TuiCommand {
   name:
     | "status"
+    | "todo"
+    | "next"
     | "plan"
     | "run"
     | "review"
+    | "queue"
+    | "history"
+    | "projects"
     | "iterations"
     | "iteration-draft"
     | "quit";
@@ -38,9 +47,14 @@ export interface TuiCommand {
 
 export type TuiCommandAction =
   | { kind: "status" }
+  | { kind: "todo" }
+  | { kind: "next" }
   | { kind: "plan" }
   | { kind: "run"; taskId: string }
   | { kind: "review"; taskId: string }
+  | { kind: "queue" }
+  | { kind: "history" }
+  | { kind: "projects" }
   | { kind: "iterations" }
   | { kind: "iteration-draft"; title: string }
   | { kind: "quit" }
@@ -52,6 +66,18 @@ const COMMANDS: TuiCommand[] = [
     shortcut: "s",
     usage: "status",
     description: "Show workflow and task status.",
+  },
+  {
+    name: "todo",
+    shortcut: "t",
+    usage: "todo",
+    description: "List todo status by lifecycle bucket.",
+  },
+  {
+    name: "next",
+    shortcut: "x",
+    usage: "next",
+    description: "Show the next dispatchable tasks.",
   },
   {
     name: "plan",
@@ -70,6 +96,24 @@ const COMMANDS: TuiCommand[] = [
     shortcut: "v",
     usage: "review <task-id>",
     description: "Prepare a task review command.",
+  },
+  {
+    name: "queue",
+    shortcut: "u",
+    usage: "queue",
+    description: "Show the persisted task queue.",
+  },
+  {
+    name: "history",
+    shortcut: "h",
+    usage: "history",
+    description: "Show recent run and review history.",
+  },
+  {
+    name: "projects",
+    shortcut: "j",
+    usage: "projects",
+    description: "Show registered projects.",
   },
   {
     name: "iterations",
@@ -105,6 +149,12 @@ export function handleTuiCommand(input: string): TuiCommandAction {
     case "s":
     case "status":
       return { kind: "status" };
+    case "t":
+    case "todo":
+      return { kind: "todo" };
+    case "x":
+    case "next":
+      return { kind: "next" };
     case "p":
     case "plan":
       return { kind: "plan" };
@@ -114,6 +164,15 @@ export function handleTuiCommand(input: string): TuiCommandAction {
     case "v":
     case "review":
       return rest ? { kind: "review", taskId: rest } : { kind: "unknown", input };
+    case "u":
+    case "queue":
+      return { kind: "queue" };
+    case "h":
+    case "history":
+      return { kind: "history" };
+    case "j":
+    case "projects":
+      return { kind: "projects" };
     case "i":
     case "iterations":
       return { kind: "iterations" };
@@ -193,20 +252,52 @@ export async function createTuiIterationDashboard(
 }
 
 export function createDefaultTuiState(cwd = process.cwd()): TuiShellState {
+  const todo = readYamlFile<WorkflowTodo>(cwd, ".ai/workflow-todo.yaml");
+  const queue = readYamlFile<TaskQueue>(cwd, ".ai/task-queue.yaml");
+  const history = readYamlFile<RunHistory>(cwd, ".ai/run-history.yaml");
+
   return {
     discussion: [
       "Main thread owns discussion, planning, decisions, and todo management.",
       "Executor agents perform bounded implementation tasks.",
+      `Project: ${todo?.project ?? "unregistered"}`,
     ],
-    specTodo: readSummary(cwd, ".ai/workflow-todo.yaml", [
-      "Workflow todo file not found.",
-    ]),
-    runs: readSummary(cwd, ".ai/runs/T-004/result.md", [
-      "T-004 initial shell is available.",
-      "Run artifacts will appear under .ai/runs/<task-id>/.",
-    ]),
+    specTodo: todo ? summarizeTodo(todo) : ["Workflow todo file not found."],
+    runs: summarizeRuns(queue, history),
     logs: readSummary(cwd, ".ai/spec.md", ["Spec file not found."]),
   };
+}
+
+export function summarizeTodo(todo: WorkflowTodo): string[] {
+  const counts = new Map<string, number>();
+  for (const task of todo.tasks) {
+    counts.set(task.status, (counts.get(task.status) ?? 0) + 1);
+  }
+
+  const readyTasks = todo.tasks.filter((task) => task.status === "ready").slice(0, 3);
+  return [
+    `Goal: ${todo.goal}`,
+    `Tasks: ${todo.tasks.length}`,
+    ...["idea", "draft", "ready", "running", "review", "fix_needed", "blocked", "done"].map(
+      (status) => `${status}: ${counts.get(status) ?? 0}`,
+    ),
+    ...readyTasks.map((task) => `ready: ${task.id} ${task.title}`),
+  ];
+}
+
+export function summarizeRuns(queue?: TaskQueue, history?: RunHistory): string[] {
+  const queueLines =
+    queue && queue.items.length > 0
+      ? queue.items.slice(0, 3).map((item) => `queue: ${item.task_id} ${item.status}`)
+      : ["queue: empty"];
+  const historyLines =
+    history && history.entries.length > 0
+      ? history.entries
+          .slice(0, 3)
+          .map((entry) => `history: ${entry.kind} ${entry.task_id ?? "-"} ${entry.status}`)
+      : ["history: empty"];
+
+  return [...queueLines, ...historyLines];
 }
 
 function renderCommandHintLines(width: number): string[] {
@@ -331,4 +422,13 @@ function readSummary(cwd: string, relativePath: string, fallback: string[]): str
     .filter(Boolean);
 
   return lines.slice(0, 6);
+}
+
+function readYamlFile<T>(cwd: string, relativePath: string): T | undefined {
+  const fullPath = join(cwd, relativePath);
+  if (!existsSync(fullPath)) {
+    return undefined;
+  }
+
+  return YAML.parse(readFileSync(fullPath, "utf8")) as T;
 }

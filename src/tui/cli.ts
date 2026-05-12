@@ -5,6 +5,17 @@ import { stdin as input, stdout as output } from "node:process";
 
 import { generateOrUpdateTodoFromDiscussion } from "../commands/plan/index.js";
 import { createOrUpdateSpecFromDiscussion } from "../commands/spec/index.js";
+import { appendRunHistoryEntry, createEmptyRunHistory, renderRunHistory } from "../history/index.js";
+import {
+  loadProjectRegistry,
+  registerProject,
+  renderProjectRegistry,
+  resolveProjectRoot,
+  saveProjectRegistry,
+  selectProject,
+} from "../projects/index.js";
+import { createEmptyTaskQueue, renderTaskQueue, syncQueueFromTodo } from "../queue/index.js";
+import type { RunHistory, TaskQueue } from "../shared/types.js";
 import { StateManager } from "../state/index.js";
 import {
   createTuiIterationDashboard,
@@ -15,7 +26,7 @@ import {
 } from "./index.js";
 
 export async function main(argv = process.argv.slice(2)): Promise<number> {
-  const rootDir = readGlobalCwd(argv) ?? process.cwd();
+  const rootDir = await resolveRootDir(argv);
   const state = createDefaultTuiState(rootDir);
   state.iterationDashboard = await createTuiIterationDashboard(rootDir);
 
@@ -26,6 +37,11 @@ export async function main(argv = process.argv.slice(2)): Promise<number> {
         "Usage:",
         "  ai-workbench [--render-once]",
         "  ai-workbench status",
+        "  ai-workbench todo",
+        "  ai-workbench next",
+        "  ai-workbench queue",
+        "  ai-workbench history",
+        "  ai-workbench projects [list|add|use]",
         "  ai-workbench plan",
         "  ai-workbench plan --prompt TEXT --spec-output FILE --todo-output FILE",
         "  ai-workbench iterations",
@@ -68,6 +84,67 @@ export async function main(argv = process.argv.slice(2)): Promise<number> {
   if (argv[0] === "iteration-draft") {
     try {
       output.write(`${renderTuiShell(state)}\n\n${await runIterationDraftCommand(argv.slice(1))}\n`);
+      return 0;
+    } catch (error) {
+      output.write(`${error instanceof Error ? error.message : String(error)}\n`);
+      return 1;
+    }
+  }
+
+  if (argv[0] === "todo") {
+    try {
+      output.write(`${renderTuiShell(state)}\n\n${await renderTodoCommand(argv.slice(1))}\n`);
+      return 0;
+    } catch (error) {
+      output.write(`${error instanceof Error ? error.message : String(error)}\n`);
+      return 1;
+    }
+  }
+
+  if (argv[0] === "next") {
+    try {
+      output.write(`${renderTuiShell(state)}\n\n${await runNextCommand(argv.slice(1))}\n`);
+      return 0;
+    } catch (error) {
+      output.write(`${error instanceof Error ? error.message : String(error)}\n`);
+      return 1;
+    }
+  }
+
+  if (argv[0] === "queue") {
+    try {
+      output.write(`${renderTuiShell(state)}\n\n${await renderQueueCommand(argv.slice(1))}\n`);
+      return 0;
+    } catch (error) {
+      output.write(`${error instanceof Error ? error.message : String(error)}\n`);
+      return 1;
+    }
+  }
+
+  if (argv[0] === "history") {
+    try {
+      output.write(`${renderTuiShell(state)}\n\n${await renderHistoryCommand(argv.slice(1))}\n`);
+      return 0;
+    } catch (error) {
+      output.write(`${error instanceof Error ? error.message : String(error)}\n`);
+      return 1;
+    }
+  }
+
+  if (argv[0] === "projects") {
+    try {
+      output.write(`${renderTuiShell(state)}\n\n${await runProjectsCommand(argv.slice(1))}\n`);
+      return 0;
+    } catch (error) {
+      output.write(`${error instanceof Error ? error.message : String(error)}\n`);
+      return 1;
+    }
+  }
+
+  if (argv[0] === "run" || argv[0] === "review") {
+    try {
+      const result = await prepareRunOrReviewCommand(argv);
+      output.write(`${renderTuiShell(await createDefaultStateWithIterations(rootDir))}\n\n${result}\n`);
       return 0;
     } catch (error) {
       output.write(`${error instanceof Error ? error.message : String(error)}\n`);
@@ -143,6 +220,116 @@ async function createDefaultStateWithIterations(rootDir: string) {
   return state;
 }
 
+async function renderTodoCommand(argv: string[]): Promise<string> {
+  const options = parseCwdOption(argv);
+  const todo = await new StateManager(options.cwd).loadTodo();
+  if (todo.tasks.length === 0) {
+    return "Todo:\n- empty";
+  }
+
+  return [
+    `Todo: ${todo.project}`,
+    ...todo.tasks.map(
+      (task) =>
+        `- ${task.id} [${task.status}] ${task.title} (${task.type}, ${task.agent})`,
+    ),
+  ].join("\n");
+}
+
+async function runNextCommand(argv: string[]): Promise<string> {
+  const options = parseCwdOption(argv);
+  const state = new StateManager(options.cwd);
+  const todo = await state.loadTodo();
+  const queue = syncQueueFromTodo(await loadTaskQueueOrEmpty(state), todo, {
+    projectId: todo.project,
+  });
+  await state.saveTaskQueue(queue);
+  const next = queue.items.filter((item) => item.status === "pending").slice(0, 5);
+
+  if (next.length === 0) {
+    return "Next:\n- no dispatchable tasks";
+  }
+
+  return ["Next:", ...next.map((item) => `- ${item.task_id} priority=${item.priority}`)].join(
+    "\n",
+  );
+}
+
+async function renderQueueCommand(argv: string[]): Promise<string> {
+  const options = parseCwdOption(argv);
+  const state = new StateManager(options.cwd);
+  return renderTaskQueue(await loadTaskQueueOrEmpty(state));
+}
+
+async function renderHistoryCommand(argv: string[]): Promise<string> {
+  const options = parseCwdOption(argv);
+  const state = new StateManager(options.cwd);
+  return renderRunHistory(await loadRunHistoryOrEmpty(state));
+}
+
+async function prepareRunOrReviewCommand(argv: string[]): Promise<string> {
+  const kind = argv[0] as "run" | "review";
+  const taskId = argv[1];
+  if (!taskId) {
+    throw new Error(`${kind} requires <task-id>`);
+  }
+
+  const options = parseCwdOption(argv.slice(2));
+  const state = new StateManager(options.cwd);
+  const todo = await state.loadTodo();
+  const task = todo.tasks.find((candidate) => candidate.id === taskId);
+  if (!task) {
+    throw new Error(`Task not found: ${taskId}`);
+  }
+
+  const history = appendRunHistoryEntry(await loadRunHistoryOrEmpty(state), {
+    kind,
+    task_id: taskId,
+    project_id: todo.project,
+    status: "prepared",
+    command: `ai-workbench ${kind} ${taskId}`,
+    summary:
+      kind === "run"
+        ? `Prepared executor handoff for ${task.title}.`
+        : `Prepared reviewer handoff for ${task.title}.`,
+  });
+  await state.saveRunHistory(history);
+
+  return [
+    `${kind}: prepared ${taskId}`,
+    `task: ${task.title}`,
+    `status: ${task.status}`,
+    `history: .ai/run-history.yaml`,
+  ].join("\n");
+}
+
+async function runProjectsCommand(argv: string[]): Promise<string> {
+  const options = parseProjectOptions(argv);
+  const registry = await loadProjectRegistry(options.registryPath);
+
+  if (options.action === "add") {
+    const updated = await registerProject(
+      registry,
+      {
+        id: options.id,
+        name: options.name,
+        path: options.path,
+      },
+      { setCurrent: true },
+    );
+    await saveProjectRegistry(updated, options.registryPath);
+    return `project added: ${options.id}\n${renderProjectRegistry(updated)}`;
+  }
+
+  if (options.action === "use") {
+    const updated = selectProject(registry, options.id);
+    await saveProjectRegistry(updated, options.registryPath);
+    return `project selected: ${options.id}\n${renderProjectRegistry(updated)}`;
+  }
+
+  return renderProjectRegistry(registry);
+}
+
 async function renderIterationsCommand(argv: string[]): Promise<string> {
   const options = parseCwdOption(argv);
   const { listIterations } = await import("../iterations/index.js");
@@ -190,6 +377,14 @@ interface PlanCommandOptions {
 
 interface CwdOption {
   cwd: string;
+}
+
+interface ProjectCommandOptions {
+  action: "list" | "add" | "use";
+  registryPath?: string;
+  id: string;
+  name: string;
+  path: string;
 }
 
 interface IterationDraftOptions extends CwdOption {
@@ -271,6 +466,59 @@ function parseCwdOption(argv: string[]): CwdOption {
   return options;
 }
 
+function parseProjectOptions(argv: string[]): ProjectCommandOptions {
+  const options: ProjectCommandOptions = {
+    action: "list",
+    id: "",
+    name: "",
+    path: "",
+  };
+  const [action] = argv;
+  let startIndex = 0;
+  if (action === "list" || action === "add" || action === "use") {
+    options.action = action;
+    startIndex = 1;
+  }
+
+  for (let index = startIndex; index < argv.length; index += 1) {
+    const value = argv[index];
+    switch (value) {
+      case "--registry":
+        options.registryPath = requireNextValue(argv, index, "--registry");
+        index += 1;
+        break;
+      case "--id":
+        options.id = requireNextValue(argv, index, "--id");
+        index += 1;
+        break;
+      case "--name":
+        options.name = requireNextValue(argv, index, "--name");
+        index += 1;
+        break;
+      case "--path":
+        options.path = requireNextValue(argv, index, "--path");
+        index += 1;
+        break;
+      default:
+        if (value?.startsWith("-")) {
+          throw new Error(`Unknown projects option: ${value}`);
+        }
+    }
+  }
+
+  if (options.action === "add") {
+    if (!options.id || !options.name || !options.path) {
+      throw new Error("projects add requires --id, --name, and --path");
+    }
+  }
+
+  if (options.action === "use" && !options.id) {
+    throw new Error("projects use requires --id");
+  }
+
+  return options;
+}
+
 function parseIterationDraftOptions(argv: string[]): IterationDraftOptions {
   const options: IterationDraftOptions = {
     cwd: process.cwd(),
@@ -314,13 +562,62 @@ function parseIterationDraftOptions(argv: string[]): IterationDraftOptions {
   return options;
 }
 
+async function resolveRootDir(argv: string[]): Promise<string> {
+  const cwd = readGlobalCwd(argv);
+  if (cwd) {
+    return cwd;
+  }
+
+  const projectId = readGlobalOption(argv, "--project");
+  if (projectId) {
+    const registry = await loadProjectRegistry(readGlobalOption(argv, "--registry"));
+    const projectRoot = resolveProjectRoot(registry, projectId);
+    if (!projectRoot) {
+      throw new Error(`Project not found: ${projectId}`);
+    }
+    return projectRoot;
+  }
+
+  return process.cwd();
+}
+
 function readGlobalCwd(argv: string[]): string | undefined {
-  const index = argv.indexOf("--cwd");
+  return readGlobalOption(argv, "--cwd");
+}
+
+function readGlobalOption(argv: string[], optionName: string): string | undefined {
+  const index = argv.indexOf(optionName);
   if (index < 0) {
     return undefined;
   }
 
   return argv[index + 1];
+}
+
+async function loadTaskQueueOrEmpty(state: StateManager): Promise<TaskQueue> {
+  try {
+    return await state.loadTaskQueue();
+  } catch (error) {
+    if (isMissingFile(error)) {
+      return createEmptyTaskQueue();
+    }
+    throw error;
+  }
+}
+
+async function loadRunHistoryOrEmpty(state: StateManager): Promise<RunHistory> {
+  try {
+    return await state.loadRunHistory();
+  } catch (error) {
+    if (isMissingFile(error)) {
+      return createEmptyRunHistory();
+    }
+    throw error;
+  }
+}
+
+function isMissingFile(error: unknown): boolean {
+  return error instanceof Error && "code" in error && error.code === "ENOENT";
 }
 
 function requireNextValue(argv: string[], index: number, optionName: string): string {
@@ -336,12 +633,22 @@ function describeAction(action: TuiCommandAction): string {
   switch (action.kind) {
     case "status":
       return "status: workflow status view selected";
+    case "todo":
+      return "todo: task list view selected";
+    case "next":
+      return "next: dispatchable task view selected";
     case "plan":
       return "plan: planning context view selected";
     case "run":
       return `run: task ${action.taskId} selected`;
     case "review":
       return `review: task ${action.taskId} selected`;
+    case "queue":
+      return "queue: persisted task queue selected";
+    case "history":
+      return "history: run history selected";
+    case "projects":
+      return "projects: project registry selected";
     case "iterations":
       return "iterations: iteration list selected";
     case "iteration-draft":

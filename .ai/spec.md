@@ -28,6 +28,8 @@ owns persistence and valid transitions.
   decisions.md
   routes.yaml
   workflow-todo.yaml
+  task-queue.yaml
+  run-history.yaml
   execution-protocol.md
   dispatch-plan.md
   iterations/
@@ -42,6 +44,15 @@ owns persistence and valid transitions.
       result.md
       review.md
 ```
+
+The multi-project registry is global by default:
+
+```text
+~/.ai-workbench/projects.yaml
+```
+
+It can be overridden per command with `--registry FILE`, which keeps tests and
+automation isolated.
 
 ## Task Lifecycle
 
@@ -105,9 +116,14 @@ The first TUI should show:
 It should support command-style actions:
 
 - `status`
+- `todo`
+- `next`
 - `plan`
 - `run <task-id>`
 - `review <task-id>`
+- `queue`
+- `history`
+- `projects`
 - `iterations`
 - `quit`
 

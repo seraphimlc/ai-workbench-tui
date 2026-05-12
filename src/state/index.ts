@@ -3,7 +3,14 @@ import { dirname, isAbsolute, join, normalize, sep } from "node:path";
 
 import YAML from "yaml";
 
-import type { RoutesConfig, TaskStatus, TodoTask, WorkflowTodo } from "../shared/types.js";
+import type {
+  RunHistory,
+  RoutesConfig,
+  TaskQueue,
+  TaskStatus,
+  TodoTask,
+  WorkflowTodo,
+} from "../shared/types.js";
 
 const READY_RUNNING_STATUSES = new Set<TaskStatus>(["ready", "running"]);
 
@@ -89,6 +96,22 @@ export class StateManager {
 
   saveTodo(todo: WorkflowTodo): Promise<void> {
     return this.saveYaml(".ai/workflow-todo.yaml", todo);
+  }
+
+  async loadTaskQueue(): Promise<TaskQueue> {
+    return YAML.parse(await this.loadText(".ai/task-queue.yaml")) as TaskQueue;
+  }
+
+  saveTaskQueue(queue: TaskQueue): Promise<void> {
+    return this.saveYaml(".ai/task-queue.yaml", queue);
+  }
+
+  async loadRunHistory(): Promise<RunHistory> {
+    return YAML.parse(await this.loadText(".ai/run-history.yaml")) as RunHistory;
+  }
+
+  saveRunHistory(history: RunHistory): Promise<void> {
+    return this.saveYaml(".ai/run-history.yaml", history);
   }
 
   loadRunArtifact(taskId: string, artifactName: string): Promise<string> {

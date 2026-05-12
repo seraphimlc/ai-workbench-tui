@@ -48,12 +48,16 @@ test("loads and saves spec, decisions, routes, todo, and run artifacts", async (
     await state.saveDecisions("# Decisions\n");
     await state.saveRoutes(routes);
     await state.saveTodo(todo);
+    await state.saveTaskQueue({ version: 1, items: [] });
+    await state.saveRunHistory({ version: 1, entries: [] });
     await state.saveRunArtifact("T-999", "result.md", "result body\n");
 
     assert.equal(await state.loadSpec(), "# Spec\n");
     assert.equal(await state.loadDecisions(), "# Decisions\n");
     assert.deepEqual(await state.loadRoutes(), routes);
     assert.deepEqual(await state.loadTodo(), todo);
+    assert.deepEqual(await state.loadTaskQueue(), { version: 1, items: [] });
+    assert.deepEqual(await state.loadRunHistory(), { version: 1, entries: [] });
     assert.equal(await state.loadRunArtifact("T-999", "result.md"), "result body\n");
   });
 });

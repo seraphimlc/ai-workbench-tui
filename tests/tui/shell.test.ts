@@ -29,9 +29,14 @@ test("renderTuiShell renders the four MVP panes and command hints", () => {
   assert.match(output, /RUNS \/ REVIEW/);
   assert.match(output, /LOG/);
   assert.match(output, /status/);
+  assert.match(output, /todo/);
+  assert.match(output, /next/);
   assert.match(output, /plan/);
   assert.match(output, /run <task-id>/);
   assert.match(output, /review <task-id>/);
+  assert.match(output, /queue/);
+  assert.match(output, /history/);
+  assert.match(output, /projects/);
   assert.match(output, /quit/);
 });
 
@@ -40,9 +45,14 @@ test("required TUI commands are registered with shortcuts", () => {
 
   assert.deepEqual(commandNames, [
     "status",
+    "todo",
+    "next",
     "plan",
     "run",
     "review",
+    "queue",
+    "history",
+    "projects",
     "iterations",
     "iteration-draft",
     "quit",
@@ -54,9 +64,14 @@ test("required TUI commands are registered with shortcuts", () => {
 
 test("handleTuiCommand recognizes status, plan, run, review, iterations, draft, and quit", () => {
   assert.equal(handleTuiCommand("status").kind, "status");
+  assert.equal(handleTuiCommand("todo").kind, "todo");
+  assert.equal(handleTuiCommand("next").kind, "next");
   assert.equal(handleTuiCommand("plan").kind, "plan");
   assert.deepEqual(handleTuiCommand("run T-004"), { kind: "run", taskId: "T-004" });
   assert.deepEqual(handleTuiCommand("review T-004"), { kind: "review", taskId: "T-004" });
+  assert.equal(handleTuiCommand("queue").kind, "queue");
+  assert.equal(handleTuiCommand("history").kind, "history");
+  assert.equal(handleTuiCommand("projects").kind, "projects");
   assert.equal(handleTuiCommand("iterations").kind, "iterations");
   assert.deepEqual(handleTuiCommand("iteration-draft Post Review Memory"), {
     kind: "iteration-draft",
@@ -288,6 +303,109 @@ test("CLI iteration-draft command creates the next iteration from review context
       readFileSync(join(root, ".ai", "iterations", "0002-post-review-memory.md"), "utf8"),
       /Reviewer approved dashboard work/,
     );
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("CLI todo, next, queue, history, and run commands expose Phase 1 controls", () => {
+  const cliPath = fileURLToPath(new URL("../../src/tui/cli.js", import.meta.url));
+  const root = mkdtempSync(join(tmpdir(), "tui-phase-controls-"));
+  try {
+    mkdirSync(join(root, ".ai"), { recursive: true });
+    writeFileSync(
+      join(root, ".ai", "workflow-todo.yaml"),
+      [
+        "project: phase-controls",
+        "version: 1",
+        "goal: exercise tui commands",
+        "tasks:",
+        "  - id: T-ready",
+        "    title: Ready command task",
+        "    type: coding",
+        "    status: ready",
+        "    agent: executor",
+        "    dependencies: []",
+        "    write_scope:",
+        "      - src/ready/**",
+        "    acceptance:",
+        "      - Can be dispatched.",
+        "    output:",
+        "      - changed_files",
+      ].join("\n"),
+      "utf8",
+    );
+
+    const todo = spawnSync(process.execPath, [cliPath, "todo", "--cwd", root], {
+      encoding: "utf8",
+    });
+    assert.equal(todo.status, 0, todo.stderr);
+    assert.match(todo.stdout, /T-ready \[ready\] Ready command task/);
+
+    const next = spawnSync(process.execPath, [cliPath, "next", "--cwd", root], {
+      encoding: "utf8",
+    });
+    assert.equal(next.status, 0, next.stderr);
+    assert.match(next.stdout, /T-ready priority=/);
+    assert.match(readFileSync(join(root, ".ai", "task-queue.yaml"), "utf8"), /T-ready/);
+
+    const run = spawnSync(process.execPath, [cliPath, "run", "T-ready", "--cwd", root], {
+      encoding: "utf8",
+    });
+    assert.equal(run.status, 0, run.stderr);
+    assert.match(run.stdout, /run: prepared T-ready/);
+    assert.match(readFileSync(join(root, ".ai", "run-history.yaml"), "utf8"), /Prepared executor/);
+
+    const history = spawnSync(process.execPath, [cliPath, "history", "--cwd", root], {
+      encoding: "utf8",
+    });
+    assert.equal(history.status, 0, history.stderr);
+    assert.match(history.stdout, /History:/);
+    assert.match(history.stdout, /run T-ready prepared/);
+
+    const queue = spawnSync(process.execPath, [cliPath, "queue", "--cwd", root], {
+      encoding: "utf8",
+    });
+    assert.equal(queue.status, 0, queue.stderr);
+    assert.match(queue.stdout, /Queue:/);
+    assert.match(queue.stdout, /T-ready pending/);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("CLI projects command manages a registry without touching project state", () => {
+  const cliPath = fileURLToPath(new URL("../../src/tui/cli.js", import.meta.url));
+  const root = mkdtempSync(join(tmpdir(), "tui-projects-"));
+  try {
+    const registry = join(root, "projects.yaml");
+    const add = spawnSync(
+      process.execPath,
+      [
+        cliPath,
+        "projects",
+        "add",
+        "--registry",
+        registry,
+        "--id",
+        "alpha",
+        "--name",
+        "Alpha",
+        "--path",
+        root,
+      ],
+      { encoding: "utf8" },
+    );
+    assert.equal(add.status, 0, add.stderr);
+    assert.match(add.stdout, /project added: alpha/);
+
+    const list = spawnSync(
+      process.execPath,
+      [cliPath, "projects", "list", "--registry", registry],
+      { encoding: "utf8" },
+    );
+    assert.equal(list.status, 0, list.stderr);
+    assert.match(list.stdout, /\* alpha Alpha/);
   } finally {
     rmSync(root, { recursive: true, force: true });
   }
