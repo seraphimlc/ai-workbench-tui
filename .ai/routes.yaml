@@ -1,0 +1,61 @@
+version: 0.1
+
+defaults:
+  discussion:
+    agent: orchestrator
+    model: minimax
+    mode: interactive
+    fallback: gpt-5.5
+  planning:
+    agent: orchestrator
+    model: deepseek
+    mode: interactive
+    fallback: gpt-5.5
+  spec:
+    agent: orchestrator
+    model: minimax
+    mode: interactive
+    fallback: gpt-5.5
+  coding:
+    agent: executor
+    model: gpt-5.5
+    mode: background
+    fallback: gpt-5.4
+  test_fix:
+    agent: executor
+    model: gpt-5.5
+    mode: background
+    fallback: gpt-5.4
+  review:
+    agent: reviewer
+    model: gpt-5.5
+    mode: background
+    fallback: gpt-5.5
+  summary:
+    agent: orchestrator
+    model: minimax
+    mode: interactive
+    fallback: gpt-5.4-mini
+
+upgrade_rules:
+  - id: high-risk-work
+    when:
+      risk:
+        - security
+        - payment
+        - migration
+        - data-loss
+    route:
+      model: gpt-5.5
+      require_human_approval: true
+  - id: repeated-test-failures
+    when:
+      tests_failed_count_gte: 2
+    route:
+      model: gpt-5.5
+      require_review: true
+  - id: broad-diff
+    when:
+      changed_files_gte: 20
+    route:
+      require_review: true

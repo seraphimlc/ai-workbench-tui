@@ -1,0 +1,434 @@
+project: ai_workbench_tui
+version: 0.1
+goal: >
+  Build a TUI-controlled AI workbench where the main conversation focuses on
+  discussion, planning, decisions, and todo management, while execution agents
+  perform coding, testing, review, and fixes against structured task specs.
+
+operating_model:
+  main_thread:
+    responsibilities:
+      - discuss requirements with the human
+      - maintain spec, decisions, and todo list
+      - decide which todos are ready
+      - dispatch execution agents with bounded context
+      - collect execution reports
+      - dispatch independent review
+      - update todos and start the next iteration
+    default_model_class: configurable_control_model
+    rule: "Main thread owns direction and state; it does not casually code."
+  executor_agents:
+    responsibilities:
+      - implement exactly one ready todo or one bounded group of non-conflicting todos
+      - modify code
+      - run tests
+      - fix failures within assigned scope
+      - report changed files, commands run, results, risks, and blockers
+    default_model_class: configurable_execution_model
+    rule: "Executors own implementation, not product direction."
+  reviewer_agent:
+    responsibilities:
+      - review final diff against spec and acceptance criteria
+      - inspect test results and execution reports
+      - identify bugs, regressions, missing tests, and scope drift
+      - produce review findings for the main thread
+    default_model_class: configurable_review_model
+    rule: "Reviewer reviews diff and evidence, not executor self-report alone."
+  state_manager:
+    kind: deterministic_program
+    responsibilities:
+      - persist spec, todo, decisions, runs, logs, and review artifacts
+      - enforce task state transitions
+      - prevent conflicting concurrent write scopes
+      - keep execution recoverable after crashes
+
+state_files:
+  spec: ".ai/spec.md"
+  decisions: ".ai/decisions.md"
+  todo: ".ai/workflow-todo.yaml"
+  runs_dir: ".ai/runs"
+  route_config: ".ai/routes.yaml"
+
+task_statuses:
+  - idea
+  - draft
+  - ready
+  - running
+  - blocked
+  - review
+  - fix_needed
+  - done
+
+tasks:
+  - id: T-001
+    title: Define durable artifact layout and task state machine
+    type: design
+    status: done
+    agent: main_thread
+    parallel_group: foundation
+    dependencies: []
+    write_scope:
+      - ".ai/spec.md"
+      - ".ai/decisions.md"
+      - ".ai/routes.yaml"
+    acceptance:
+      - "Spec defines artifact directories and file ownership."
+      - "Task lifecycle is explicit and recoverable."
+      - "State transitions define who may move a task between statuses."
+    output:
+      - ".ai/spec.md"
+      - ".ai/decisions.md"
+      - ".ai/routes.yaml"
+
+  - id: T-002
+    title: Design model routing schema
+    type: design
+    status: done
+    agent: main_thread
+    parallel_group: foundation
+    dependencies: []
+    write_scope:
+      - ".ai/routes.yaml"
+    acceptance:
+      - "Routes map task type to agent role, model, mode, fallback, and escalation rules."
+      - "Config supports global defaults, project overrides, and single-run overrides."
+      - "High-risk routes can require GPT review or human approval."
+    output:
+      - ".ai/routes.yaml"
+
+  - id: T-003
+    title: Specify todo item schema and validation rules
+    type: design
+    status: done
+    agent: main_thread
+    parallel_group: foundation
+    dependencies: []
+    write_scope:
+      - ".ai/spec.md"
+      - ".ai/workflow-todo.yaml"
+    acceptance:
+      - "Todo schema includes id, type, status, risk, dependencies, scope, write_scope, acceptance, artifacts, and owner."
+      - "Ready tasks must have acceptance criteria and bounded write_scope."
+      - "Parallel safety rule is documented."
+    output:
+      - ".ai/spec.md"
+      - ".ai/workflow-todo.yaml"
+
+  - id: T-004
+    title: Build initial TUI shell
+    type: coding
+    status: done
+    agent: executor
+    parallel_group: tui
+    dependencies:
+      - T-001
+      - T-002
+      - T-003
+    suggested_stack:
+      - "Node.js"
+      - "TypeScript"
+      - "Ink or blessed"
+    write_scope:
+      - "package.json"
+      - "src/tui/**"
+      - "tests/tui/**"
+    acceptance:
+      - "Command starts without crashing."
+      - "TUI shows discussion, spec/todo, runs, and log panes."
+      - "Keyboard shortcuts or commands exist for status, plan, run, review, and quit."
+      - "Basic render tests or smoke tests pass."
+    output:
+      - "changed_files"
+      - "test_results"
+      - ".ai/runs/T-004/result.md"
+
+  - id: T-005
+    title: Implement state manager for artifacts and task transitions
+    type: coding
+    status: done
+    agent: executor
+    parallel_group: state
+    dependencies:
+      - T-001
+      - T-003
+    suggested_stack:
+      - "TypeScript"
+      - "YAML parser"
+    write_scope:
+      - "src/state/**"
+      - "tests/state/**"
+    acceptance:
+      - "Can load and save spec, decisions, routes, todo, and run artifacts."
+      - "Rejects invalid task transitions."
+      - "Rejects ready/running conflicts on overlapping write_scope."
+      - "Tests cover valid transition, invalid transition, and write conflict."
+    output:
+      - "changed_files"
+      - "test_results"
+      - ".ai/runs/T-005/result.md"
+
+  - id: T-006
+    title: Implement model router abstraction
+    type: coding
+    status: done
+    agent: executor
+    parallel_group: router
+    dependencies:
+      - T-002
+    suggested_stack:
+      - "TypeScript"
+    write_scope:
+      - "src/router/**"
+      - "tests/router/**"
+    acceptance:
+      - "Router resolves task type to agent role, model, mode, fallback, and escalation rule."
+      - "Project config overrides global defaults."
+      - "Single-run override wins over project and global defaults."
+      - "Tests cover default, project override, run override, and high-risk escalation."
+    output:
+      - "changed_files"
+      - "test_results"
+      - ".ai/runs/T-006/result.md"
+
+  - id: T-007
+    title: Implement main-thread planning commands
+    type: coding
+    status: done
+    agent: executor
+    parallel_group: orchestration
+    dependencies:
+      - T-004
+      - T-005
+      - T-006
+    write_scope:
+      - "src/commands/plan/**"
+      - "src/commands/spec/**"
+      - "tests/commands/**"
+    acceptance:
+      - "TUI command can create or update spec from a discussion prompt."
+      - "TUI command can generate or update todo list."
+      - "Long model output is saved to artifacts and summarized in TUI."
+      - "Tests cover artifact creation and no-loss persistence."
+    output:
+      - "changed_files"
+      - "test_results"
+      - ".ai/runs/T-007/result.md"
+
+  - id: T-008
+    title: Implement executor dispatch protocol
+    type: coding
+    status: done
+    agent: executor
+    parallel_group: execution
+    dependencies:
+      - T-005
+      - T-006
+    write_scope:
+      - "src/execution/**"
+      - "tests/execution/**"
+    acceptance:
+      - "Can build a bounded handoff prompt from spec, todo item, scope, and acceptance criteria."
+      - "Can start a background CLI process for an executor."
+      - "Captures stdout, stderr, exit code, timestamps, and artifact paths."
+      - "Does not print secrets into logs."
+    output:
+      - "changed_files"
+      - "test_results"
+      - ".ai/runs/T-008/result.md"
+
+  - id: T-009
+    title: Implement run monitor and task status updates
+    type: coding
+    status: done
+    agent: executor
+    parallel_group: execution
+    dependencies:
+      - T-005
+      - T-008
+    write_scope:
+      - "src/execution/**"
+      - "src/state/**"
+      - "tests/execution/**"
+    acceptance:
+      - "Running task updates status from ready to running to review/done/blocked."
+      - "Failed process marks task blocked or fix_needed with reason."
+      - "TUI can show live run status without dumping full logs."
+      - "Tests cover success, failure, and interrupted run recovery."
+    output:
+      - "changed_files"
+      - "test_results"
+      - ".ai/runs/T-009/result.md"
+
+  - id: T-010
+    title: Implement review dispatch protocol
+    type: coding
+    status: done
+    agent: executor
+    parallel_group: review
+    dependencies:
+      - T-005
+      - T-006
+      - T-008
+    write_scope:
+      - "src/review/**"
+      - "tests/review/**"
+    acceptance:
+      - "Reviewer input includes diff, acceptance criteria, test output, and execution report."
+      - "Reviewer output is saved to .ai/runs/<task-id>/review.md."
+      - "Review findings can update todo status to done or fix_needed."
+      - "Tests cover clean review and review with actionable findings."
+    output:
+      - "changed_files"
+      - "test_results"
+      - ".ai/runs/T-010/result.md"
+
+  - id: T-011
+    title: Add iteration loop command
+    type: coding
+    status: done
+    agent: executor
+    parallel_group: orchestration
+    dependencies:
+      - T-007
+      - T-009
+      - T-010
+    write_scope:
+      - "src/commands/iterate/**"
+      - "tests/commands/**"
+    acceptance:
+      - "Command reads review results and proposes next todo updates."
+      - "Main thread can accept, edit, or reject proposed todo changes."
+      - "Fix-needed review items become new or updated todos."
+      - "Tests cover a review-to-fix-needed iteration."
+    output:
+      - "changed_files"
+      - "test_results"
+      - ".ai/runs/T-011/result.md"
+
+  - id: T-012
+    title: End-to-end MVP smoke flow
+    type: integration
+    status: done
+    agent: executor
+    parallel_group: integration
+    dependencies:
+      - T-004
+      - T-005
+      - T-006
+      - T-007
+      - T-008
+      - T-009
+      - T-010
+      - T-011
+    write_scope:
+      - "tests/e2e/**"
+      - "README.md"
+    acceptance:
+      - "Demo flow creates spec, todo, dispatches a fake executor, saves result, runs fake review, and updates todo."
+      - "README documents the MVP workflow and commands."
+      - "All tests pass."
+      - "No API key appears in logs, process arguments captured by tests, or committed files."
+    output:
+      - "changed_files"
+      - "test_results"
+      - ".ai/runs/T-012/result.md"
+
+  - id: T-013
+    title: Implement iteration artifact management
+    type: coding
+    status: done
+    agent: executor
+    parallel_group: iteration
+    dependencies:
+      - T-005
+    write_scope:
+      - "src/iterations/**"
+      - "tests/iterations/**"
+      - ".ai/iterations/template.md"
+    acceptance:
+      - "Can create the next numbered iteration note from the template."
+      - "Can list existing iterations in order."
+      - "Can read the latest iteration as required context for planning."
+      - "Tests cover numbering, template rendering, and latest-iteration lookup."
+    output:
+      - "changed_files"
+      - "test_results"
+      - ".ai/runs/T-013/result.md"
+
+  - id: T-014
+    title: Add TUI iteration dashboard
+    type: coding
+    status: done
+    agent: executor
+    parallel_group: tui
+    dependencies:
+      - T-004
+      - T-013
+    write_scope:
+      - "src/tui/**"
+      - "tests/tui/**"
+    acceptance:
+      - "TUI shows latest iteration title, current capability, remaining gaps, and next recommendation."
+      - "TUI can open or display the iteration list."
+      - "TUI can create a new iteration draft after review."
+      - "Tests cover rendering latest iteration data."
+    output:
+      - "changed_files"
+      - "test_results"
+      - ".ai/runs/T-014/result.md"
+
+execution_plan:
+  round_1_foundation:
+    mode: sequential_main_thread
+    tasks:
+      - T-001
+      - T-002
+      - T-003
+    reason: "These define the contract. Executors should not start before contracts are stable."
+  round_2_parallel_implementation:
+    mode: parallel_executor_agents
+    tasks:
+      - T-004
+      - T-005
+      - T-006
+    reason: "TUI shell, state manager, and router have mostly disjoint write scopes after foundation."
+  round_3_orchestration:
+    mode: parallel_with_dependency_checks
+    tasks:
+      - T-007
+      - T-008
+      - T-010
+    reason: "Planning, executor handoff, and review handoff can proceed once state/router exist."
+  round_4_run_loop:
+    mode: mostly_sequential
+    tasks:
+      - T-009
+      - T-011
+      - T-012
+    reason: "Monitoring and iteration depend on prior protocols and should be integrated carefully."
+  round_5_iteration_memory:
+    mode: dependency_based
+    tasks:
+      - T-013
+      - T-014
+    reason: "Iteration artifact management depends on state management; dashboard depends on TUI and iteration artifacts."
+
+review_plan:
+  per_task:
+    - "Executor writes result.md with changed files, tests, risks, and blockers."
+    - "Reviewer checks diff, tests, result.md, and acceptance criteria."
+    - "Main thread updates status to done or fix_needed."
+  final:
+    reviewer_agent: reviewer
+    inputs:
+      - ".ai/spec.md"
+      - ".ai/workflow-todo.yaml"
+      - "git diff or file changes"
+      - ".ai/runs/*/result.md"
+      - ".ai/runs/*/review.md"
+    output:
+      - ".ai/runs/final-review.md"
+    acceptance:
+      - "All ready implementation tasks are either done or explicitly deferred."
+      - "Final review has no unresolved high-severity findings."
+      - "Main thread receives clear next-iteration recommendations."
