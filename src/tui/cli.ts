@@ -3,6 +3,7 @@ import { readFile } from "node:fs/promises";
 import { createInterface } from "node:readline/promises";
 import { stdin as input, stdout as output } from "node:process";
 
+import { renderAlignmentCheck } from "../alignment/index.js";
 import { generateOrUpdateTodoFromDiscussion } from "../commands/plan/index.js";
 import { createOrUpdateSpecFromDiscussion } from "../commands/spec/index.js";
 import { dispatchExecutorCommand } from "../dispatch/index.js";
@@ -16,8 +17,15 @@ import {
   selectProject,
 } from "../projects/index.js";
 import { createEmptyTaskQueue, renderTaskQueue, syncQueueFromTodo } from "../queue/index.js";
+import {
+  doctorWorkbenchProject,
+  initWorkbenchProject,
+  renderDoctorReport,
+  renderInitResult,
+} from "../setup/index.js";
 import type { RunHistory, TaskQueue } from "../shared/types.js";
 import { StateManager } from "../state/index.js";
+import { runNextQueueItem, validateExecutorProfiles } from "../worker/index.js";
 import {
   createTuiIterationDashboard,
   createDefaultTuiState,
@@ -38,8 +46,13 @@ export async function main(argv = process.argv.slice(2)): Promise<number> {
         "Usage:",
         "  ai-workbench [--render-once]",
         "  ai-workbench status",
+        "  ai-workbench align",
+        "  ai-workbench init",
+        "  ai-workbench doctor",
         "  ai-workbench todo",
         "  ai-workbench next",
+        "  ai-workbench run-next --profile NAME",
+        "  ai-workbench run-next --executor-command CMD --executor-arg ARG",
         "  ai-workbench queue",
         "  ai-workbench history",
         "  ai-workbench projects [list|add|use]",
@@ -60,6 +73,37 @@ export async function main(argv = process.argv.slice(2)): Promise<number> {
   if (argv.includes("--render-once") || argv.length === 0) {
     output.write(`${renderTuiShell(state)}\n`);
     return 0;
+  }
+
+  if (argv[0] === "align") {
+    try {
+      output.write(`${renderTuiShell(state)}\n\n${await renderAlignCommand(argv.slice(1))}\n`);
+      return 0;
+    } catch (error) {
+      output.write(`${error instanceof Error ? error.message : String(error)}\n`);
+      return 1;
+    }
+  }
+
+  if (argv[0] === "init") {
+    try {
+      output.write(`${renderTuiShell(state)}\n\n${await runInitCommand(argv.slice(1))}\n`);
+      return 0;
+    } catch (error) {
+      output.write(`${error instanceof Error ? error.message : String(error)}\n`);
+      return 1;
+    }
+  }
+
+  if (argv[0] === "doctor") {
+    try {
+      const result = await runDoctorCommand(argv.slice(1));
+      output.write(`${renderTuiShell(state)}\n\n${result.output}\n`);
+      return result.ok ? 0 : 1;
+    } catch (error) {
+      output.write(`${error instanceof Error ? error.message : String(error)}\n`);
+      return 1;
+    }
   }
 
   if (argv[0] === "plan" && argv.length > 1) {
@@ -106,6 +150,16 @@ export async function main(argv = process.argv.slice(2)): Promise<number> {
   if (argv[0] === "next") {
     try {
       output.write(`${renderTuiShell(state)}\n\n${await runNextCommand(argv.slice(1))}\n`);
+      return 0;
+    } catch (error) {
+      output.write(`${error instanceof Error ? error.message : String(error)}\n`);
+      return 1;
+    }
+  }
+
+  if (argv[0] === "run-next") {
+    try {
+      output.write(`${renderTuiShell(await createDefaultStateWithIterations(rootDir))}\n\n${await runNextWorkerCommand(argv.slice(1))}\n`);
       return 0;
     } catch (error) {
       output.write(`${error instanceof Error ? error.message : String(error)}\n`);
@@ -238,6 +292,30 @@ async function renderTodoCommand(argv: string[]): Promise<string> {
   ].join("\n");
 }
 
+async function renderAlignCommand(argv: string[]): Promise<string> {
+  const options = parseCwdOption(argv);
+  return renderAlignmentCheck(options.cwd);
+}
+
+async function runInitCommand(argv: string[]): Promise<string> {
+  const options = parseInitOptions(argv);
+  return renderInitResult(
+    await initWorkbenchProject(options.cwd, {
+      projectName: options.name,
+      force: options.force,
+    }),
+  );
+}
+
+async function runDoctorCommand(argv: string[]): Promise<{ ok: boolean; output: string }> {
+  const options = parseCwdOption(argv);
+  const report = await doctorWorkbenchProject(options.cwd);
+  return {
+    ok: report.ok,
+    output: renderDoctorReport(report),
+  };
+}
+
 async function runNextCommand(argv: string[]): Promise<string> {
   const options = parseCwdOption(argv);
   const state = new StateManager(options.cwd);
@@ -255,6 +333,63 @@ async function runNextCommand(argv: string[]): Promise<string> {
   return ["Next:", ...next.map((item) => `- ${item.task_id} priority=${item.priority}`)].join(
     "\n",
   );
+}
+
+async function runNextWorkerCommand(argv: string[]): Promise<string> {
+  const options = parseRunNextCommandOptions(argv);
+  if (options.validateProfiles) {
+    const validation = await validateExecutorProfiles(
+      new StateManager(options.cwd),
+      options.profilePath,
+    );
+    if (!validation.ok) {
+      throw new Error(
+        ["executor profiles invalid:", ...validation.errors.map((error) => `- ${error}`)].join(
+          "\n",
+        ),
+      );
+    }
+
+    return [
+      "executor profiles valid",
+      `profiles: ${validation.profiles.join(", ") || "(none)"}`,
+      `default: ${validation.defaultProfile ?? "(none)"}`,
+    ].join("\n");
+  }
+
+  const result = await runNextQueueItem({
+    state: new StateManager(options.cwd),
+    command: options.executorCommand,
+    args: options.executorArgs,
+    profile: options.profile,
+    profilePath: options.profilePath,
+    successStatus: options.successStatus,
+    timeoutMs: options.timeoutMs,
+    dryRun: options.dryRun,
+  });
+
+  if (result.status === "empty") {
+    return "run-next: no pending queue items";
+  }
+
+  if (result.status === "dry-run") {
+    return [
+      `run-next: dry-run ${result.taskId}`,
+      `source: ${result.preview.source}`,
+      `command: ${[result.preview.command, ...result.preview.args].join(" ")}`,
+      `successStatus: ${result.preview.successStatus}`,
+      `timeoutMs: ${result.preview.timeoutMs ?? "none"}`,
+    ].join("\n");
+  }
+
+  return [
+    `run-next: executed ${result.taskId}`,
+    `ok: ${String(result.dispatch.ok)}`,
+    `phase: ${result.dispatch.phase}`,
+    `exitCode: ${result.dispatch.exitCode ?? "null"}`,
+    `artifacts: .ai/runs/${result.taskId}/`,
+    `history: .ai/run-history.yaml`,
+  ].join("\n");
 }
 
 async function renderQueueCommand(argv: string[]): Promise<string> {
@@ -410,10 +545,23 @@ interface ProjectCommandOptions {
   path: string;
 }
 
+interface InitCommandOptions extends CwdOption {
+  name?: string;
+  force: boolean;
+}
+
 interface RunCommandOptions extends CwdOption {
   executorCommand?: string;
   executorArgs: string[];
   successStatus: "review" | "done";
+}
+
+interface RunNextCommandOptions extends RunCommandOptions {
+  profile?: string;
+  profilePath?: string;
+  dryRun: boolean;
+  validateProfiles: boolean;
+  timeoutMs?: number;
 }
 
 interface IterationDraftOptions extends CwdOption {
@@ -548,6 +696,36 @@ function parseProjectOptions(argv: string[]): ProjectCommandOptions {
   return options;
 }
 
+function parseInitOptions(argv: string[]): InitCommandOptions {
+  const options: InitCommandOptions = {
+    cwd: process.cwd(),
+    force: false,
+  };
+
+  for (let index = 0; index < argv.length; index += 1) {
+    const value = argv[index];
+    switch (value) {
+      case "--cwd":
+        options.cwd = requireNextValue(argv, index, "--cwd");
+        index += 1;
+        break;
+      case "--name":
+        options.name = requireNextValue(argv, index, "--name");
+        index += 1;
+        break;
+      case "--force":
+        options.force = true;
+        break;
+      default:
+        if (value?.startsWith("-")) {
+          throw new Error(`Unknown init option: ${value}`);
+        }
+    }
+  }
+
+  return options;
+}
+
 function parseRunCommandOptions(argv: string[]): RunCommandOptions {
   const options: RunCommandOptions = {
     cwd: process.cwd(),
@@ -582,6 +760,70 @@ function parseRunCommandOptions(argv: string[]): RunCommandOptions {
       default:
         if (value?.startsWith("-")) {
           throw new Error(`Unknown run option: ${value}`);
+        }
+    }
+  }
+
+  return options;
+}
+
+function parseRunNextCommandOptions(argv: string[]): RunNextCommandOptions {
+  const options: RunNextCommandOptions = {
+    cwd: process.cwd(),
+    executorArgs: [],
+    successStatus: "review",
+    dryRun: false,
+    validateProfiles: false,
+  };
+
+  for (let index = 0; index < argv.length; index += 1) {
+    const value = argv[index];
+    switch (value) {
+      case "--cwd":
+        options.cwd = requireNextValue(argv, index, "--cwd");
+        index += 1;
+        break;
+      case "--executor-command":
+        options.executorCommand = requireNextValue(argv, index, "--executor-command");
+        index += 1;
+        break;
+      case "--executor-arg":
+        options.executorArgs.push(requireNextValue(argv, index, "--executor-arg"));
+        index += 1;
+        break;
+      case "--profile":
+        options.profile = requireNextValue(argv, index, "--profile");
+        index += 1;
+        break;
+      case "--profiles":
+        options.profilePath = requireNextValue(argv, index, "--profiles");
+        index += 1;
+        break;
+      case "--dry-run":
+        options.dryRun = true;
+        break;
+      case "--validate-profiles":
+        options.validateProfiles = true;
+        break;
+      case "--timeout-ms":
+        options.timeoutMs = parseNonNegativeInteger(
+          requireNextValue(argv, index, "--timeout-ms"),
+          "--timeout-ms",
+        );
+        index += 1;
+        break;
+      case "--success-status": {
+        const next = requireNextValue(argv, index, "--success-status");
+        if (next !== "review" && next !== "done") {
+          throw new Error("--success-status must be review or done");
+        }
+        options.successStatus = next;
+        index += 1;
+        break;
+      }
+      default:
+        if (value?.startsWith("-")) {
+          throw new Error(`Unknown run-next option: ${value}`);
         }
     }
   }
@@ -699,14 +941,31 @@ function requireNextValue(argv: string[], index: number, optionName: string): st
   return next;
 }
 
+function parseNonNegativeInteger(value: string, optionName: string): number {
+  const parsed = Number(value);
+  if (!Number.isInteger(parsed) || parsed < 0) {
+    throw new Error(`${optionName} must be a non-negative integer`);
+  }
+
+  return parsed;
+}
+
 function describeAction(action: TuiCommandAction): string {
   switch (action.kind) {
     case "status":
       return "status: workflow status view selected";
+    case "align":
+      return "align: objective lock selected";
+    case "init":
+      return "init: project setup selected";
+    case "doctor":
+      return "doctor: project diagnostics selected";
     case "todo":
       return "todo: task list view selected";
     case "next":
       return "next: dispatchable task view selected";
+    case "run-next":
+      return "run-next: queue worker selected";
     case "plan":
       return "plan: planning context view selected";
     case "run":

@@ -100,3 +100,22 @@ test("runExecutorProcess starts a background process and captures redacted artif
     assert.match(await readFile(result.artifactPaths.handoff, "utf8"), /SECRET=\[REDACTED\]/);
   });
 });
+
+test("runExecutorProcess terminates long running commands after timeout", async () => {
+  await withTempDir(async (root) => {
+    const run = await runExecutorProcess({
+      command: process.execPath,
+      args: ["-e", "setTimeout(() => console.log('late'), 1000)"],
+      cwd: root,
+      runDir: join(root, ".ai", "runs", "T-timeout"),
+      timeoutMs: 50,
+    });
+
+    const result = await run.completed;
+
+    assert.equal(result.timedOut, true);
+    assert.equal(result.exitCode, null);
+    assert.match(result.stderr, /timed out after 50ms/);
+    assert.match(await readFile(result.artifactPaths.stderr, "utf8"), /timed out after 50ms/);
+  });
+});

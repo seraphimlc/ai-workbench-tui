@@ -46,6 +46,14 @@ What executors changed, which tests ran, and where artifacts are stored.
 
 Reviewer findings and whether they are accepted, rejected, or converted to fix tasks.
 
+## Stop / Continue Decision
+
+Decision: stop | continue | ask-human
+
+Reason:
+
+- Not documented.
+
 ## Capability After Iteration
 
 What the system can do now that it could not do before.

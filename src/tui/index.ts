@@ -29,8 +29,12 @@ export interface TuiIterationDashboard {
 export interface TuiCommand {
   name:
     | "status"
+    | "align"
+    | "init"
+    | "doctor"
     | "todo"
     | "next"
+    | "run-next"
     | "plan"
     | "run"
     | "review"
@@ -47,8 +51,12 @@ export interface TuiCommand {
 
 export type TuiCommandAction =
   | { kind: "status" }
+  | { kind: "align" }
+  | { kind: "init" }
+  | { kind: "doctor" }
   | { kind: "todo" }
   | { kind: "next" }
+  | { kind: "run-next" }
   | { kind: "plan" }
   | { kind: "run"; taskId: string }
   | { kind: "review"; taskId: string }
@@ -68,6 +76,24 @@ const COMMANDS: TuiCommand[] = [
     description: "Show workflow and task status.",
   },
   {
+    name: "align",
+    shortcut: "a",
+    usage: "align",
+    description: "Show the current objective lock and drift check.",
+  },
+  {
+    name: "init",
+    shortcut: "o",
+    usage: "init",
+    description: "Create starter .ai workflow files.",
+  },
+  {
+    name: "doctor",
+    shortcut: "d",
+    usage: "doctor",
+    description: "Check project setup and executor profiles.",
+  },
+  {
     name: "todo",
     shortcut: "t",
     usage: "todo",
@@ -78,6 +104,12 @@ const COMMANDS: TuiCommand[] = [
     shortcut: "x",
     usage: "next",
     description: "Show the next dispatchable tasks.",
+  },
+  {
+    name: "run-next",
+    shortcut: "w",
+    usage: "run-next",
+    description: "Execute the next pending queue item.",
   },
   {
     name: "plan",
@@ -149,12 +181,24 @@ export function handleTuiCommand(input: string): TuiCommandAction {
     case "s":
     case "status":
       return { kind: "status" };
+    case "a":
+    case "align":
+      return { kind: "align" };
+    case "o":
+    case "init":
+      return { kind: "init" };
+    case "d":
+    case "doctor":
+      return { kind: "doctor" };
     case "t":
     case "todo":
       return { kind: "todo" };
     case "x":
     case "next":
       return { kind: "next" };
+    case "w":
+    case "run-next":
+      return { kind: "run-next" };
     case "p":
     case "plan":
       return { kind: "plan" };

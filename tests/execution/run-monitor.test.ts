@@ -100,6 +100,25 @@ test("marks failed runs blocked with a concise reason and truncated log preview"
   assert.ok((failed.summary.stdoutPreview ?? "").length <= 80);
 });
 
+test("marks timed out runs blocked with timeout reason", () => {
+  const started = markTaskRunStarted(todoWithTask(baseTask), "T-009");
+  const failed = applyExecutorRunResultToTodo(
+    started.todo,
+    "T-009",
+    result({
+      exitCode: null,
+      signal: "SIGTERM",
+      timedOut: true,
+      timeoutMs: 250,
+      stderr: "process timed out after 250ms\n",
+    }),
+  );
+
+  assert.equal(failed.todo.tasks[0]?.status, "blocked");
+  assert.equal(failed.summary.phase, "blocked");
+  assert.match(failed.summary.reason ?? "", /timed out after 250ms/);
+});
+
 test("marks review-stage process failures fix_needed when requested", () => {
   const reviewTodo = todoWithTask({ ...baseTask, status: "review" });
   const failed = applyExecutorRunResultToTodo(

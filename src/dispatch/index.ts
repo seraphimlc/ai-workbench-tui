@@ -30,6 +30,7 @@ export interface DispatchExecutorCommandInput {
   cwd?: string;
   env?: NodeJS.ProcessEnv;
   successStatus?: "review" | "done";
+  timeoutMs?: number;
 }
 
 export interface DispatchExecutorCommandResult {
@@ -72,6 +73,7 @@ export async function dispatchExecutorCommand(
     runDir,
     handoffPrompt,
     stdin: handoffPrompt,
+    timeoutMs: input.timeoutMs,
   });
   const runResult = await running.completed.catch((error: unknown) =>
     persistExecutorStartFailure(running.artifactPaths, running.startedAt, error),

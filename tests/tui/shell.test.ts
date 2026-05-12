@@ -29,8 +29,12 @@ test("renderTuiShell renders the four MVP panes and command hints", () => {
   assert.match(output, /RUNS \/ REVIEW/);
   assert.match(output, /LOG/);
   assert.match(output, /status/);
+  assert.match(output, /align/);
+  assert.match(output, /init/);
+  assert.match(output, /doctor/);
   assert.match(output, /todo/);
   assert.match(output, /next/);
+  assert.match(output, /run-next/);
   assert.match(output, /plan/);
   assert.match(output, /run <task-id>/);
   assert.match(output, /review <task-id>/);
@@ -45,8 +49,12 @@ test("required TUI commands are registered with shortcuts", () => {
 
   assert.deepEqual(commandNames, [
     "status",
+    "align",
+    "init",
+    "doctor",
     "todo",
     "next",
+    "run-next",
     "plan",
     "run",
     "review",
@@ -64,8 +72,12 @@ test("required TUI commands are registered with shortcuts", () => {
 
 test("handleTuiCommand recognizes status, plan, run, review, iterations, draft, and quit", () => {
   assert.equal(handleTuiCommand("status").kind, "status");
+  assert.equal(handleTuiCommand("align").kind, "align");
+  assert.equal(handleTuiCommand("init").kind, "init");
+  assert.equal(handleTuiCommand("doctor").kind, "doctor");
   assert.equal(handleTuiCommand("todo").kind, "todo");
   assert.equal(handleTuiCommand("next").kind, "next");
+  assert.equal(handleTuiCommand("run-next").kind, "run-next");
   assert.equal(handleTuiCommand("plan").kind, "plan");
   assert.deepEqual(handleTuiCommand("run T-004"), { kind: "run", taskId: "T-004" });
   assert.deepEqual(handleTuiCommand("review T-004"), { kind: "review", taskId: "T-004" });
@@ -156,6 +168,107 @@ test("CLI can render once and exit without crashing", () => {
   assert.match(result.stdout, /SPEC \/ TODO/);
   assert.match(result.stdout, /RUNS \/ REVIEW/);
   assert.match(result.stdout, /LOG/);
+});
+
+test("CLI align command renders the alignment checkpoint", () => {
+  const cliPath = fileURLToPath(new URL("../../src/tui/cli.js", import.meta.url));
+  const root = mkdtempSync(join(tmpdir(), "tui-align-"));
+  try {
+    mkdirSync(join(root, ".ai"), { recursive: true });
+    writeFileSync(
+      join(root, ".ai", "workflow-todo.yaml"),
+      [
+        "project: align-cli",
+        "version: 1",
+        "goal: check alignment",
+        "tasks:",
+        "  - id: T-align",
+        "    title: Alignment task",
+        "    type: coding",
+        "    status: done",
+        "    agent: executor",
+        "    dependencies: []",
+        "    write_scope:",
+        "      - src/alignment/**",
+        "    acceptance:",
+        "      - Alignment renders.",
+        "    output:",
+        "      - changed_files",
+      ].join("\n"),
+      "utf8",
+    );
+    writeFileSync(
+      join(root, ".ai", "alignment.md"),
+      [
+        "# Alignment Checkpoint",
+        "",
+        "## Goal",
+        "",
+        "- Keep work bounded.",
+        "",
+        "## Non-goals",
+        "",
+        "- No provider adapters.",
+        "",
+        "## Stop Conditions",
+        "",
+        "- Stop once all tasks are done.",
+        "",
+        "## Success Criteria",
+        "",
+        "- align command renders.",
+      ].join("\n"),
+      "utf8",
+    );
+
+    const result = spawnSync(process.execPath, [cliPath, "align", "--cwd", root], {
+      encoding: "utf8",
+    });
+
+    assert.equal(result.status, 0, result.stderr);
+    assert.match(result.stdout, /Alignment:/);
+    assert.match(result.stdout, /Keep work bounded/);
+    assert.match(result.stdout, /Decision: stop/);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("CLI init and doctor prepare a portable workbench project", () => {
+  const cliPath = fileURLToPath(new URL("../../src/tui/cli.js", import.meta.url));
+  const root = mkdtempSync(join(tmpdir(), "tui-init-doctor-"));
+  try {
+    const init = spawnSync(
+      process.execPath,
+      [cliPath, "init", "--cwd", root, "--name", "Portable App"],
+      { encoding: "utf8" },
+    );
+
+    assert.equal(init.status, 0, init.stderr);
+    assert.match(init.stdout, /init: created/);
+    assert.match(readFileSync(join(root, ".ai", "spec.md"), "utf8"), /Portable App/);
+
+    const doctor = spawnSync(process.execPath, [cliPath, "doctor", "--cwd", root], {
+      encoding: "utf8",
+    });
+
+    assert.equal(doctor.status, 0, doctor.stderr);
+    assert.match(doctor.stdout, /Doctor: pass/);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("example echo executor reads handoff stdin and reports a compact summary", () => {
+  const executorPath = join(process.cwd(), "examples", "executors", "echo-executor.js");
+  const result = spawnSync(process.execPath, [executorPath], {
+    input: "# Executor handoff\n\n## Task\nShip it\n",
+    encoding: "utf8",
+  });
+
+  assert.equal(result.status, 0, result.stderr);
+  assert.match(result.stdout, /echo executor received handoff/);
+  assert.match(result.stdout, /bytes=/);
 });
 
 test("CLI plan command creates spec and todo artifacts from model output files", () => {
@@ -467,6 +580,220 @@ test("CLI run can execute an external executor command", () => {
     );
     assert.match(readFileSync(join(root, ".ai", "run-history.yaml"), "utf8"), /review/);
     assert.match(readFileSync(join(root, ".ai", "task-queue.yaml"), "utf8"), /review/);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("CLI run-next executes the next queued task with an executor profile", () => {
+  const cliPath = fileURLToPath(new URL("../../src/tui/cli.js", import.meta.url));
+  const root = mkdtempSync(join(tmpdir(), "tui-run-next-"));
+  try {
+    mkdirSync(join(root, ".ai"), { recursive: true });
+    writeFileSync(join(root, ".ai", "spec.md"), "# Run Next Spec\n", "utf8");
+    writeFileSync(
+      join(root, ".ai", "workflow-todo.yaml"),
+      [
+        "project: run-next-cli",
+        "version: 1",
+        "goal: run queued commands",
+        "tasks:",
+        "  - id: T-next",
+        "    title: Execute next command",
+        "    type: coding",
+        "    status: ready",
+        "    agent: executor",
+        "    dependencies: []",
+        "    write_scope:",
+        "      - src/next/**",
+        "    acceptance:",
+        "      - Command runs.",
+        "    output:",
+        "      - changed_files",
+      ].join("\n"),
+      "utf8",
+    );
+    writeFileSync(
+      join(root, ".ai", "executor-profiles.yaml"),
+      [
+        "version: 1",
+        "default_profile: node-ok",
+        "profiles:",
+        "  node-ok:",
+        `    command: ${JSON.stringify(process.execPath)}`,
+        "    args:",
+        "      - -e",
+        "      - console.log('run next ok')",
+      ].join("\n"),
+      "utf8",
+    );
+
+    const result = spawnSync(
+      process.execPath,
+      [cliPath, "run-next", "--cwd", root, "--profile", "node-ok"],
+      { encoding: "utf8" },
+    );
+
+    assert.equal(result.status, 0, result.stderr);
+    assert.match(result.stdout, /run-next: executed T-next/);
+    assert.match(result.stdout, /phase: review/);
+    assert.match(
+      readFileSync(join(root, ".ai", "runs", "T-next", "stdout.log"), "utf8"),
+      /run next ok/,
+    );
+    assert.match(readFileSync(join(root, ".ai", "task-queue.yaml"), "utf8"), /review/);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("CLI run-next dry-run previews without executing artifacts", () => {
+  const cliPath = fileURLToPath(new URL("../../src/tui/cli.js", import.meta.url));
+  const root = mkdtempSync(join(tmpdir(), "tui-run-next-dry-"));
+  try {
+    mkdirSync(join(root, ".ai"), { recursive: true });
+    writeFileSync(join(root, ".ai", "spec.md"), "# Run Next Dry Spec\n", "utf8");
+    writeFileSync(
+      join(root, ".ai", "workflow-todo.yaml"),
+      [
+        "project: run-next-dry",
+        "version: 1",
+        "goal: preview queued commands",
+        "tasks:",
+        "  - id: T-dry",
+        "    title: Preview next command",
+        "    type: coding",
+        "    status: ready",
+        "    agent: executor",
+        "    dependencies: []",
+        "    write_scope:",
+        "      - src/dry/**",
+        "    acceptance:",
+        "      - Command previews.",
+        "    output:",
+        "      - changed_files",
+      ].join("\n"),
+      "utf8",
+    );
+
+    const result = spawnSync(
+      process.execPath,
+      [
+        cliPath,
+        "run-next",
+        "--cwd",
+        root,
+        "--dry-run",
+        "--executor-command",
+        process.execPath,
+        "--executor-arg",
+        "-e",
+        "--executor-arg",
+        "console.log('should not run')",
+      ],
+      { encoding: "utf8" },
+    );
+
+    assert.equal(result.status, 0, result.stderr);
+    assert.match(result.stdout, /run-next: dry-run T-dry/);
+    assert.match(readFileSync(join(root, ".ai", "workflow-todo.yaml"), "utf8"), /status: ready/);
+    assert.throws(
+      () => readFileSync(join(root, ".ai", "runs", "T-dry", "stdout.log"), "utf8"),
+      /ENOENT/,
+    );
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("CLI run-next can validate executor profiles", () => {
+  const cliPath = fileURLToPath(new URL("../../src/tui/cli.js", import.meta.url));
+  const root = mkdtempSync(join(tmpdir(), "tui-validate-profiles-"));
+  try {
+    mkdirSync(join(root, ".ai"), { recursive: true });
+    writeFileSync(
+      join(root, ".ai", "executor-profiles.yaml"),
+      [
+        "version: 1",
+        "default_profile: node-ok",
+        "profiles:",
+        "  node-ok:",
+        `    command: ${JSON.stringify(process.execPath)}`,
+        "    args: []",
+        "    timeout_ms: 1000",
+      ].join("\n"),
+      "utf8",
+    );
+
+    const result = spawnSync(
+      process.execPath,
+      [cliPath, "run-next", "--cwd", root, "--validate-profiles"],
+      { encoding: "utf8" },
+    );
+
+    assert.equal(result.status, 0, result.stderr);
+    assert.match(result.stdout, /executor profiles valid/);
+    assert.match(result.stdout, /node-ok/);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("CLI run-next timeout marks the queued task blocked", () => {
+  const cliPath = fileURLToPath(new URL("../../src/tui/cli.js", import.meta.url));
+  const root = mkdtempSync(join(tmpdir(), "tui-run-next-timeout-"));
+  try {
+    mkdirSync(join(root, ".ai"), { recursive: true });
+    writeFileSync(join(root, ".ai", "spec.md"), "# Timeout Spec\n", "utf8");
+    writeFileSync(
+      join(root, ".ai", "workflow-todo.yaml"),
+      [
+        "project: run-next-timeout",
+        "version: 1",
+        "goal: timeout queued commands",
+        "tasks:",
+        "  - id: T-timeout",
+        "    title: Timeout next command",
+        "    type: coding",
+        "    status: ready",
+        "    agent: executor",
+        "    dependencies: []",
+        "    write_scope:",
+        "      - src/timeout/**",
+        "    acceptance:",
+        "      - Command times out.",
+        "    output:",
+        "      - changed_files",
+      ].join("\n"),
+      "utf8",
+    );
+
+    const result = spawnSync(
+      process.execPath,
+      [
+        cliPath,
+        "run-next",
+        "--cwd",
+        root,
+        "--timeout-ms",
+        "50",
+        "--executor-command",
+        process.execPath,
+        "--executor-arg",
+        "-e",
+        "--executor-arg",
+        "setTimeout(() => console.log('late'), 1000)",
+      ],
+      { encoding: "utf8" },
+    );
+
+    assert.equal(result.status, 0, result.stderr);
+    assert.match(result.stdout, /phase: blocked/);
+    assert.match(readFileSync(join(root, ".ai", "workflow-todo.yaml"), "utf8"), /status: blocked/);
+    assert.match(
+      readFileSync(join(root, ".ai", "runs", "T-timeout", "stderr.log"), "utf8"),
+      /timed out after 50ms/,
+    );
   } finally {
     rmSync(root, { recursive: true, force: true });
   }

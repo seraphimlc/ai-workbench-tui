@@ -462,6 +462,258 @@ tasks:
       - ".ai/runs/T-018/review.md"
       - ".ai/iterations/0005-executor-cli-bridge.md"
 
+  - id: T-019
+    title: Design queue worker control iteration
+    type: design
+    status: done
+    agent: main_thread
+    parallel_group: queue_worker
+    dependencies:
+      - T-018
+    write_scope:
+      - ".ai/spec.md"
+      - ".ai/workflow-todo.yaml"
+      - "plans/latest-minimax-plan.md"
+    acceptance:
+      - "MiniMax planning is captured as advisory input."
+      - "Queue worker scope focuses on run-next and executor profiles."
+      - "Queue state remains separate from executor command profile configuration."
+    output:
+      - "plans/latest-minimax-plan.md"
+      - ".ai/spec.md"
+      - ".ai/workflow-todo.yaml"
+
+  - id: T-020
+    title: Implement queue worker run-next service
+    type: coding
+    status: done
+    agent: executor
+    parallel_group: queue_worker
+    dependencies:
+      - T-019
+    write_scope:
+      - "src/worker/**"
+      - "tests/worker/**"
+    acceptance:
+      - "Worker syncs dispatchable todos into the persisted queue."
+      - "Worker selects the highest-priority pending queue item."
+      - "Worker dispatches the selected task through the existing executor bridge."
+      - "Tests cover execution, empty queue behavior, and profile resolution."
+    output:
+      - "changed_files"
+      - "test_results"
+
+  - id: T-021
+    title: Wire CLI run-next command
+    type: coding
+    status: done
+    agent: executor
+    parallel_group: queue_worker
+    dependencies:
+      - T-020
+    write_scope:
+      - "src/tui/**"
+      - "tests/tui/**"
+      - "README.md"
+    acceptance:
+      - "TUI command registry exposes run-next."
+      - "CLI supports run-next with --profile and one-off --executor-command options."
+      - "CLI output summarizes task id, ok, phase, exit code, artifacts, and history."
+      - "README documents run-next usage."
+    output:
+      - "changed_files"
+      - "test_results"
+
+  - id: T-022
+    title: Review queue worker control iteration
+    type: review
+    status: done
+    agent: reviewer
+    parallel_group: queue_worker
+    dependencies:
+      - T-020
+      - T-021
+    write_scope:
+      - ".ai/runs/T-022/**"
+      - ".ai/iterations/**"
+    acceptance:
+      - "Review checks queue selection, profile handling, state persistence, and test coverage."
+      - "Verification evidence is recorded."
+      - "Next-iteration gaps are documented."
+    output:
+      - ".ai/runs/T-022/review.md"
+      - ".ai/iterations/0006-queue-worker-controls.md"
+
+  - id: T-023
+    title: Design executor safety controls iteration
+    type: design
+    status: done
+    agent: main_thread
+    parallel_group: executor_safety
+    dependencies:
+      - T-022
+    write_scope:
+      - ".ai/spec.md"
+      - ".ai/workflow-todo.yaml"
+      - "plans/latest-minimax-plan.md"
+    acceptance:
+      - "MiniMax planning is captured as advisory input."
+      - "Safety scope focuses on dry-run, timeout, and profile validation."
+      - "Daemon/watch behavior remains deferred."
+    output:
+      - "plans/latest-minimax-plan.md"
+      - ".ai/spec.md"
+      - ".ai/workflow-todo.yaml"
+
+  - id: T-024
+    title: Implement executor timeout and dry-run safety controls
+    type: coding
+    status: done
+    agent: executor
+    parallel_group: executor_safety
+    dependencies:
+      - T-023
+    write_scope:
+      - "src/execution/**"
+      - "src/dispatch/**"
+      - "src/worker/**"
+      - "tests/execution/**"
+      - "tests/worker/**"
+    acceptance:
+      - "Executor process supports timeout_ms and records timeout artifacts."
+      - "Timed out tasks are marked blocked with a timeout reason."
+      - "run-next dry-run previews the selected task without executing or writing workflow state."
+      - "Tests cover timeout, dry-run, and timeout status summaries."
+    output:
+      - "changed_files"
+      - "test_results"
+
+  - id: T-025
+    title: Wire CLI safety controls and profile validation
+    type: coding
+    status: done
+    agent: executor
+    parallel_group: executor_safety
+    dependencies:
+      - T-024
+    write_scope:
+      - "src/tui/**"
+      - "tests/tui/**"
+      - "README.md"
+      - ".ai/executor-profiles.example.yaml"
+    acceptance:
+      - "CLI supports run-next --dry-run."
+      - "CLI supports run-next --timeout-ms."
+      - "CLI supports run-next --validate-profiles."
+      - "README documents safety controls."
+    output:
+      - "changed_files"
+      - "test_results"
+
+  - id: T-026
+    title: Review executor safety controls iteration
+    type: review
+    status: done
+    agent: reviewer
+    parallel_group: executor_safety
+    dependencies:
+      - T-024
+      - T-025
+    write_scope:
+      - ".ai/runs/T-026/**"
+      - ".ai/iterations/**"
+    acceptance:
+      - "Review checks dry-run immutability, timeout handling, profile validation, and test coverage."
+      - "Verification evidence is recorded."
+      - "Next-iteration stop/go recommendation is documented."
+    output:
+      - ".ai/runs/T-026/review.md"
+      - ".ai/iterations/0007-executor-safety-controls.md"
+
+  - id: T-027
+    title: Design minimum productization pass
+    type: design
+    status: done
+    agent: main_thread
+    parallel_group: productization
+    dependencies:
+      - T-026
+    write_scope:
+      - "plans/latest-minimax-plan.md"
+      - ".ai/spec.md"
+      - ".ai/workflow-todo.yaml"
+    acceptance:
+      - "MiniMax planning is captured as advisory input."
+      - "Scope is limited to init, doctor, examples, and docs."
+      - "npm publishing and provider marketplace remain deferred."
+    output:
+      - "plans/latest-minimax-plan.md"
+      - ".ai/spec.md"
+      - ".ai/workflow-todo.yaml"
+
+  - id: T-028
+    title: Implement init and doctor commands
+    type: coding
+    status: done
+    agent: executor
+    parallel_group: productization
+    dependencies:
+      - T-027
+    write_scope:
+      - "src/setup/**"
+      - "src/tui/**"
+      - "tests/setup/**"
+      - "tests/tui/**"
+    acceptance:
+      - "init creates starter spec, todo, alignment, and executor profile files."
+      - "init does not overwrite existing files unless forced."
+      - "doctor reports required file, Node.js, todo, and profile status."
+      - "CLI tests cover init and doctor."
+    output:
+      - "changed_files"
+      - "test_results"
+
+  - id: T-029
+    title: Add example executor and model adapter documentation
+    type: documentation
+    status: done
+    agent: executor
+    parallel_group: productization
+    dependencies:
+      - T-028
+    write_scope:
+      - "examples/**"
+      - "docs/**"
+      - "README.md"
+    acceptance:
+      - "Example executor reads handoff stdin and exits successfully."
+      - "Getting started guide explains install, init, doctor, and first run."
+      - "Model adapter guide explains reasoning file inputs and executor profiles."
+      - "README links to the new guides."
+    output:
+      - "changed_files"
+      - "test_results"
+
+  - id: T-030
+    title: Review minimum productization pass
+    type: review
+    status: done
+    agent: reviewer
+    parallel_group: productization
+    dependencies:
+      - T-028
+      - T-029
+    write_scope:
+      - ".ai/runs/T-030/**"
+      - ".ai/iterations/**"
+    acceptance:
+      - "Review checks init, doctor, example executor, docs, and test coverage."
+      - "Verification evidence is recorded."
+      - "Next stop/go recommendation is documented."
+    output:
+      - ".ai/runs/T-030/review.md"
+      - ".ai/iterations/0008-minimum-productization.md"
+
 execution_plan:
   round_1_foundation:
     mode: sequential_main_thread
@@ -505,6 +757,30 @@ execution_plan:
       - T-017
       - T-018
     reason: "The dispatch service should exist before CLI wiring; review closes the loop before model provider work."
+  round_7_queue_worker_controls:
+    mode: mostly_sequential
+    tasks:
+      - T-019
+      - T-020
+      - T-021
+      - T-022
+    reason: "The worker service should exist before CLI wiring; review closes the loop before model provider work."
+  round_8_executor_safety_controls:
+    mode: mostly_sequential
+    tasks:
+      - T-023
+      - T-024
+      - T-025
+      - T-026
+    reason: "One-shot queue execution needs preview, validation, and timeout controls before daemon or provider work."
+  round_9_minimum_productization:
+    mode: mostly_sequential
+    tasks:
+      - T-027
+      - T-028
+      - T-029
+      - T-030
+    reason: "External users need init, diagnostics, examples, and docs before provider adapters or packaging."
 
 review_plan:
   per_task:

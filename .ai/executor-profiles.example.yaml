@@ -1,0 +1,10 @@
+version: 1
+default_profile: node-dry-run
+profiles:
+  node-dry-run:
+    command: node
+    args:
+      - -e
+      - "console.log('executor profile placeholder')"
+    success_status: review
+    timeout_ms: 300000

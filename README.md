@@ -10,6 +10,38 @@ This workspace now contains a TypeScript MVP for a controller-led AI workbench:
 - deterministic state: `.ai/spec.md`, `.ai/workflow-todo.yaml`, `.ai/runs/**`,
   `.ai/iterations/**`
 
+## Quickstart
+
+Requirements:
+
+- Node.js 18 or newer
+- npm
+
+Install and build:
+
+```bash
+npm install
+npm run build
+```
+
+Create workbench state in a project:
+
+```bash
+node dist/src/tui/cli.js init --name "My Project"
+node dist/src/tui/cli.js doctor
+```
+
+Preview and run queued executor work:
+
+```bash
+node dist/src/tui/cli.js run-next --dry-run --profile echo-executor
+node dist/src/tui/cli.js run-next --profile echo-executor
+```
+
+See [docs/getting-started.md](docs/getting-started.md) for installation and
+first-run guidance. See [docs/model-adapters.md](docs/model-adapters.md) for
+using your own reasoning and execution models.
+
 Run the current TUI shell:
 
 ```bash
@@ -23,13 +55,20 @@ Useful commands:
 
 ```bash
 node dist/src/tui/cli.js status
+node dist/src/tui/cli.js init --name "My Project"
+node dist/src/tui/cli.js doctor
+node dist/src/tui/cli.js align
 node dist/src/tui/cli.js todo
 node dist/src/tui/cli.js next
+node dist/src/tui/cli.js run-next --profile node-ok
+node dist/src/tui/cli.js run-next --dry-run --profile node-ok
+node dist/src/tui/cli.js run-next --validate-profiles
 node dist/src/tui/cli.js queue
 node dist/src/tui/cli.js history
 node dist/src/tui/cli.js projects list
 node dist/src/tui/cli.js projects add --id my-app --name "My App" --path /path/to/project
 node dist/src/tui/cli.js run T-123 --executor-command node --executor-arg ./executor.js
+node dist/src/tui/cli.js run-next --executor-command node --executor-arg ./executor.js
 node dist/src/tui/cli.js iterations
 node dist/src/tui/cli.js iteration-draft --title "Next Round"
 node dist/src/tui/cli.js plan --prompt "Update plan" --spec-output /tmp/spec.md --todo-output /tmp/todo.yaml
@@ -48,6 +87,16 @@ Phase 1/4 additions:
 - `run <task-id> --executor-command CMD --executor-arg ARG` runs a real
   external executor command, sends the task handoff on stdin, and persists
   `.ai/runs/<task-id>/`, `.ai/task-queue.yaml`, and `.ai/run-history.yaml`.
+- `run-next` syncs ready tasks into the queue, selects the highest-priority
+  pending task, and runs it through the same executor bridge.
+- `run-next --profile NAME` loads executor command presets from
+  `.ai/executor-profiles.yaml`; `--executor-command` remains available for a
+  one-off local command.
+- `run-next --dry-run` previews the selected pending task and executor command
+  without starting a process or writing workflow state.
+- `run-next --timeout-ms N` or profile `timeout_ms: N` terminates long-running
+  executor commands and records the task as blocked with timeout evidence.
+- `run-next --validate-profiles` checks executor profile schema before a run.
 - `history` shows recent run/review preparation history.
 - `projects` manages a global project registry at `~/.ai-workbench/projects.yaml`
   unless `--registry FILE` is supplied.

@@ -30,6 +30,7 @@ export interface ExecutorProcessInput {
   handoffPrompt?: string;
   stdin?: string;
   maxLogCharacters?: number;
+  timeoutMs?: number;
 }
 
 export interface ExecutorRunResult {
@@ -41,6 +42,8 @@ export interface ExecutorRunResult {
   endedAt: string;
   durationMs: number;
   artifactPaths: ExecutorArtifactPaths;
+  timedOut?: boolean;
+  timeoutMs?: number;
 }
 
 export interface RunningExecutorProcess {
@@ -64,6 +67,8 @@ export interface RunStatusSummary {
   durationMs?: number;
   exitCode?: number | null;
   signal?: NodeJS.Signals | null;
+  timedOut?: boolean;
+  timeoutMs?: number;
   stdoutBytes: number;
   stderrBytes: number;
   stdoutPreview?: string;
@@ -101,6 +106,8 @@ export interface BuildRunStatusSummaryInput {
   durationMs?: number;
   exitCode?: number | null;
   signal?: NodeJS.Signals | null;
+  timedOut?: boolean;
+  timeoutMs?: number;
   stdout?: string;
   stderr?: string;
   maxPreviewCharacters?: number;
@@ -218,6 +225,8 @@ export function applyExecutorRunResultToTodo(
     durationMs: result.durationMs,
     exitCode: result.exitCode,
     signal: result.signal,
+    timedOut: result.timedOut,
+    timeoutMs: result.timeoutMs,
     stdout: result.stdout,
     stderr: result.stderr,
     maxPreviewCharacters: options.maxPreviewCharacters,
@@ -247,6 +256,8 @@ export function buildRunStatusSummary(input: BuildRunStatusSummaryInput): RunSta
     durationMs: input.durationMs,
     exitCode: input.exitCode,
     signal: input.signal,
+    timedOut: input.timedOut,
+    timeoutMs: input.timeoutMs,
     stdoutBytes: stdout.length,
     stderrBytes: stderr.length,
     stdoutPreview: previewLog(stdout, maxPreviewCharacters),
@@ -312,6 +323,7 @@ export async function runExecutorProcess(
     artifactPaths,
     startedAt,
     maxLogCharacters: input.maxLogCharacters ?? DEFAULT_MAX_LOG_CHARACTERS,
+    timeoutMs: normalizeTimeoutMs(input.timeoutMs),
   });
 
   if (input.stdin !== undefined) {
@@ -381,6 +393,10 @@ function failureStatusForTask(
 }
 
 function buildFailureReason(result: ExecutorRunResult): string {
+  if (result.timedOut) {
+    return `process timed out after ${result.timeoutMs ?? "unknown"}ms`;
+  }
+
   if (result.signal) {
     return `process ended from signal ${result.signal}`;
   }
@@ -443,6 +459,7 @@ function collectProcessResult(
     artifactPaths: ExecutorArtifactPaths;
     startedAt: Date;
     maxLogCharacters: number;
+    timeoutMs?: number;
   },
 ): Promise<ExecutorRunResult> {
   return new Promise((resolve, reject) => {
@@ -451,6 +468,13 @@ function collectProcessResult(
     let stdoutLength = 0;
     let stderrLength = 0;
     let processError: Error | undefined;
+    let timedOut = false;
+    const timeout = options.timeoutMs
+      ? setTimeout(() => {
+          timedOut = true;
+          child.kill("SIGTERM");
+        }, options.timeoutMs)
+      : undefined;
 
     child.stdout.on("data", (chunk: Buffer) => {
       const next = chunk.toString("utf8");
@@ -477,23 +501,32 @@ function collectProcessResult(
     });
 
     child.on("close", (exitCode, signal) => {
+      if (timeout) {
+        clearTimeout(timeout);
+      }
       void (async () => {
         const endedAt = new Date();
+        const timeoutMessage = timedOut
+          ? `process timed out after ${options.timeoutMs}ms`
+          : "";
         const stdout = redactSecrets(stdoutChunks.join(""));
         const stderr = redactSecrets(
-          processError
-            ? [stderrChunks.join(""), processError.message].filter(Boolean).join("\n")
-            : stderrChunks.join(""),
+          [
+            stderrChunks.join(""),
+            processError?.message,
+            timeoutMessage,
+          ].filter(Boolean).join("\n"),
         );
         const result: ExecutorRunResult = {
           stdout,
           stderr,
-          exitCode: processError ? null : exitCode,
+          exitCode: processError || timedOut ? null : exitCode,
           signal,
           startedAt: options.startedAt.toISOString(),
           endedAt: endedAt.toISOString(),
           durationMs: Math.max(0, endedAt.getTime() - options.startedAt.getTime()),
           artifactPaths: options.artifactPaths,
+          ...(timedOut ? { timedOut, timeoutMs: options.timeoutMs } : {}),
         };
 
         await writeFile(options.artifactPaths.stdout, stdout, "utf8");
@@ -503,6 +536,13 @@ function collectProcessResult(
       })().catch(reject);
     });
   });
+}
+
+function normalizeTimeoutMs(value: number | undefined): number | undefined {
+  if (value === undefined || value <= 0) {
+    return undefined;
+  }
+  return value;
 }
 
 function appendBoundedChunk(

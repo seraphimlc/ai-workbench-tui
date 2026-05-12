@@ -1,0 +1,9 @@
+version: 1
+default_profile: echo-executor
+profiles:
+  echo-executor:
+    command: node
+    args:
+      - examples/executors/echo-executor.js
+    success_status: review
+    timeout_ms: 300000

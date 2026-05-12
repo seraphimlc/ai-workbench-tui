@@ -30,6 +30,8 @@ owns persistence and valid transitions.
   workflow-todo.yaml
   task-queue.yaml
   run-history.yaml
+  alignment.md
+  executor-profiles.yaml
   execution-protocol.md
   dispatch-plan.md
   iterations/
@@ -116,6 +118,9 @@ The first TUI should show:
 It should support command-style actions:
 
 - `status`
+- `align`
+- `init`
+- `doctor`
 - `todo`
 - `next`
 - `plan`
@@ -133,6 +138,37 @@ It should support command-style actions:
 - with `--executor-command CMD --executor-arg ARG`, it starts the external
   executor command, writes the handoff to stdin, captures logs and result
   artifacts, updates todo status, updates queue status, and appends run history
+
+`run-next` is the queue worker control:
+
+- first sync ready, dispatchable todos into `.ai/task-queue.yaml`
+- select the highest-priority `pending` queue item
+- resolve an executor command from explicit CLI options or
+  `.ai/executor-profiles.yaml`
+- run the task through the same executor bridge as `run <task-id>`
+- preserve the review gate by moving successful tasks to `review` by default
+- support `--dry-run` previews that do not start a process or write workflow state
+- support timeout controls from `--timeout-ms` or profile `timeout_ms`
+- support `--validate-profiles` to check profile schema before dispatch
+
+Executor profiles are intentionally separate from queue items. Queue state
+records what should run; profiles record how local executor commands are
+invoked.
+
+Timeouts terminate the executor process, persist stdout/stderr/result artifacts,
+and mark the task `blocked` with a timeout reason in todo state and run history.
+
+`init` and `doctor` are the minimum productization controls:
+
+- `init` creates starter `.ai` files for a new project without overwriting
+  existing files unless forced.
+- `doctor` checks required `.ai` files, Node.js, workflow todo parsing, and
+  executor profile validity.
+
+Model adapters remain external:
+
+- reasoning models write spec/todo output files consumed by `plan`
+- execution models are commands configured in `.ai/executor-profiles.yaml`
 
 ## Iteration Rule
 
