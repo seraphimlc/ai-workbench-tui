@@ -5,6 +5,7 @@ import { stdin as input, stdout as output } from "node:process";
 
 import { generateOrUpdateTodoFromDiscussion } from "../commands/plan/index.js";
 import { createOrUpdateSpecFromDiscussion } from "../commands/spec/index.js";
+import { dispatchExecutorCommand } from "../dispatch/index.js";
 import { appendRunHistoryEntry, createEmptyRunHistory, renderRunHistory } from "../history/index.js";
 import {
   loadProjectRegistry,
@@ -47,6 +48,7 @@ export async function main(argv = process.argv.slice(2)): Promise<number> {
         "  ai-workbench iterations",
         "  ai-workbench iteration-draft --title TEXT --review FILE",
         "  ai-workbench run <task-id>",
+        "  ai-workbench run <task-id> --executor-command CMD --executor-arg ARG",
         "  ai-workbench review <task-id>",
         "  ai-workbench quit",
         "",
@@ -274,6 +276,27 @@ async function prepareRunOrReviewCommand(argv: string[]): Promise<string> {
     throw new Error(`${kind} requires <task-id>`);
   }
 
+  if (kind === "run") {
+    const runOptions = parseRunCommandOptions(argv.slice(2));
+    if (runOptions.executorCommand) {
+      const result = await dispatchExecutorCommand({
+        state: new StateManager(runOptions.cwd),
+        taskId,
+        command: runOptions.executorCommand,
+        args: runOptions.executorArgs,
+        successStatus: runOptions.successStatus,
+      });
+      return [
+        `run: executed ${taskId}`,
+        `ok: ${String(result.ok)}`,
+        `phase: ${result.phase}`,
+        `exitCode: ${result.exitCode ?? "null"}`,
+        `artifacts: .ai/runs/${taskId}/`,
+        `history: .ai/run-history.yaml`,
+      ].join("\n");
+    }
+  }
+
   const options = parseCwdOption(argv.slice(2));
   const state = new StateManager(options.cwd);
   const todo = await state.loadTodo();
@@ -385,6 +408,12 @@ interface ProjectCommandOptions {
   id: string;
   name: string;
   path: string;
+}
+
+interface RunCommandOptions extends CwdOption {
+  executorCommand?: string;
+  executorArgs: string[];
+  successStatus: "review" | "done";
 }
 
 interface IterationDraftOptions extends CwdOption {
@@ -514,6 +543,47 @@ function parseProjectOptions(argv: string[]): ProjectCommandOptions {
 
   if (options.action === "use" && !options.id) {
     throw new Error("projects use requires --id");
+  }
+
+  return options;
+}
+
+function parseRunCommandOptions(argv: string[]): RunCommandOptions {
+  const options: RunCommandOptions = {
+    cwd: process.cwd(),
+    executorArgs: [],
+    successStatus: "review",
+  };
+
+  for (let index = 0; index < argv.length; index += 1) {
+    const value = argv[index];
+    switch (value) {
+      case "--cwd":
+        options.cwd = requireNextValue(argv, index, "--cwd");
+        index += 1;
+        break;
+      case "--executor-command":
+        options.executorCommand = requireNextValue(argv, index, "--executor-command");
+        index += 1;
+        break;
+      case "--executor-arg":
+        options.executorArgs.push(requireNextValue(argv, index, "--executor-arg"));
+        index += 1;
+        break;
+      case "--success-status": {
+        const next = requireNextValue(argv, index, "--success-status");
+        if (next !== "review" && next !== "done") {
+          throw new Error("--success-status must be review or done");
+        }
+        options.successStatus = next;
+        index += 1;
+        break;
+      }
+      default:
+        if (value?.startsWith("-")) {
+          throw new Error(`Unknown run option: ${value}`);
+        }
+    }
   }
 
   return options;

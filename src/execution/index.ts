@@ -450,6 +450,7 @@ function collectProcessResult(
     const stderrChunks: string[] = [];
     let stdoutLength = 0;
     let stderrLength = 0;
+    let processError: Error | undefined;
 
     child.stdout.on("data", (chunk: Buffer) => {
       const next = chunk.toString("utf8");
@@ -472,18 +473,22 @@ function collectProcessResult(
     });
 
     child.on("error", (error) => {
-      reject(error);
+      processError = error;
     });
 
     child.on("close", (exitCode, signal) => {
       void (async () => {
         const endedAt = new Date();
         const stdout = redactSecrets(stdoutChunks.join(""));
-        const stderr = redactSecrets(stderrChunks.join(""));
+        const stderr = redactSecrets(
+          processError
+            ? [stderrChunks.join(""), processError.message].filter(Boolean).join("\n")
+            : stderrChunks.join(""),
+        );
         const result: ExecutorRunResult = {
           stdout,
           stderr,
-          exitCode,
+          exitCode: processError ? null : exitCode,
           signal,
           startedAt: options.startedAt.toISOString(),
           endedAt: endedAt.toISOString(),

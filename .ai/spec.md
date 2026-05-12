@@ -127,6 +127,13 @@ It should support command-style actions:
 - `iterations`
 - `quit`
 
+`run <task-id>` has two modes:
+
+- without executor options, it records prepared handoff intent in run history
+- with `--executor-command CMD --executor-arg ARG`, it starts the external
+  executor command, writes the handoff to stdin, captures logs and result
+  artifacts, updates todo status, updates queue status, and appends run history
+
 ## Iteration Rule
 
 After every execution/review cycle, the main thread writes an iteration note in

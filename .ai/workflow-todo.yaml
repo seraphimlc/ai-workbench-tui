@@ -377,6 +377,91 @@ tasks:
       - "test_results"
       - ".ai/runs/T-014/result.md"
 
+  - id: T-015
+    title: Design executor CLI bridge iteration
+    type: design
+    status: done
+    agent: main_thread
+    parallel_group: executor_bridge
+    dependencies:
+      - T-008
+      - T-009
+    write_scope:
+      - ".ai/workflow-todo.yaml"
+      - ".ai/iterations/**"
+    acceptance:
+      - "Todo list focuses on external executor command dispatch only."
+      - "Real model provider integration and Web UI remain deferred."
+      - "MiniMax planning failure is recorded without blocking execution."
+    output:
+      - ".ai/workflow-todo.yaml"
+      - ".ai/iterations/0005-executor-cli-bridge.md"
+
+  - id: T-016
+    title: Implement reusable executor dispatch service
+    type: coding
+    status: done
+    agent: executor
+    parallel_group: executor_bridge
+    dependencies:
+      - T-008
+      - T-009
+      - T-015
+    write_scope:
+      - "src/dispatch/**"
+      - "tests/dispatch/**"
+    acceptance:
+      - "Dispatch service builds a handoff prompt for a todo task."
+      - "Dispatch service runs an external command with the handoff on stdin."
+      - "Dispatch service persists run artifacts, todo status, queue status, and run history."
+      - "Tests cover successful and failed external commands."
+    output:
+      - "changed_files"
+      - "test_results"
+      - ".ai/runs/T-016/result.md"
+
+  - id: T-017
+    title: Wire CLI run command to executor bridge
+    type: coding
+    status: done
+    agent: executor
+    parallel_group: executor_bridge
+    dependencies:
+      - T-016
+    write_scope:
+      - "src/tui/cli.ts"
+      - "tests/tui/**"
+      - "README.md"
+    acceptance:
+      - "`run <task-id>` without executor options keeps the existing prepare-only behavior."
+      - "`run <task-id> --executor-command CMD --executor-arg ARG` starts the external command."
+      - "CLI output summarizes ok, phase, exit code, artifact directory, and history file."
+      - "Tests cover the executable CLI path."
+    output:
+      - "changed_files"
+      - "test_results"
+      - ".ai/runs/T-017/result.md"
+
+  - id: T-018
+    title: Review executor CLI bridge iteration
+    type: review
+    status: done
+    agent: reviewer
+    parallel_group: executor_bridge
+    dependencies:
+      - T-016
+      - T-017
+    write_scope:
+      - ".ai/runs/T-018/**"
+      - ".ai/iterations/**"
+    acceptance:
+      - "Review checks state transitions, queue/history persistence, and test coverage."
+      - "Verification evidence is recorded."
+      - "Next-iteration gaps are documented."
+    output:
+      - ".ai/runs/T-018/review.md"
+      - ".ai/iterations/0005-executor-cli-bridge.md"
+
 execution_plan:
   round_1_foundation:
     mode: sequential_main_thread
@@ -412,6 +497,14 @@ execution_plan:
       - T-013
       - T-014
     reason: "Iteration artifact management depends on state management; dashboard depends on TUI and iteration artifacts."
+  round_6_executor_cli_bridge:
+    mode: mostly_sequential
+    tasks:
+      - T-015
+      - T-016
+      - T-017
+      - T-018
+    reason: "The dispatch service should exist before CLI wiring; review closes the loop before model provider work."
 
 review_plan:
   per_task:

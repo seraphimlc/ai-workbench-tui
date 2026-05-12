@@ -29,6 +29,7 @@ node dist/src/tui/cli.js queue
 node dist/src/tui/cli.js history
 node dist/src/tui/cli.js projects list
 node dist/src/tui/cli.js projects add --id my-app --name "My App" --path /path/to/project
+node dist/src/tui/cli.js run T-123 --executor-command node --executor-arg ./executor.js
 node dist/src/tui/cli.js iterations
 node dist/src/tui/cli.js iteration-draft --title "Next Round"
 node dist/src/tui/cli.js plan --prompt "Update plan" --spec-output /tmp/spec.md --todo-output /tmp/todo.yaml
@@ -44,6 +45,9 @@ Phase 1/4 additions:
 - `queue` shows the persisted queue.
 - `run <task-id>` and `review <task-id>` prepare handoff intent and append
   `.ai/run-history.yaml`.
+- `run <task-id> --executor-command CMD --executor-arg ARG` runs a real
+  external executor command, sends the task handoff on stdin, and persists
+  `.ai/runs/<task-id>/`, `.ai/task-queue.yaml`, and `.ai/run-history.yaml`.
 - `history` shows recent run/review preparation history.
 - `projects` manages a global project registry at `~/.ai-workbench/projects.yaml`
   unless `--registry FILE` is supplied.

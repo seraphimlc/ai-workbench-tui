@@ -410,3 +410,64 @@ test("CLI projects command manages a registry without touching project state", (
     rmSync(root, { recursive: true, force: true });
   }
 });
+
+test("CLI run can execute an external executor command", () => {
+  const cliPath = fileURLToPath(new URL("../../src/tui/cli.js", import.meta.url));
+  const root = mkdtempSync(join(tmpdir(), "tui-run-executor-"));
+  try {
+    mkdirSync(join(root, ".ai"), { recursive: true });
+    writeFileSync(join(root, ".ai", "spec.md"), "# Executor CLI Spec\n", "utf8");
+    writeFileSync(
+      join(root, ".ai", "workflow-todo.yaml"),
+      [
+        "project: executor-cli",
+        "version: 1",
+        "goal: run executor commands",
+        "tasks:",
+        "  - id: T-exec",
+        "    title: Execute command",
+        "    type: coding",
+        "    status: ready",
+        "    agent: executor",
+        "    dependencies: []",
+        "    write_scope:",
+        "      - src/executor/**",
+        "    acceptance:",
+        "      - Command runs.",
+        "    output:",
+        "      - changed_files",
+      ].join("\n"),
+      "utf8",
+    );
+
+    const result = spawnSync(
+      process.execPath,
+      [
+        cliPath,
+        "run",
+        "T-exec",
+        "--cwd",
+        root,
+        "--executor-command",
+        process.execPath,
+        "--executor-arg",
+        "-e",
+        "--executor-arg",
+        "console.log('executor cli ok')",
+      ],
+      { encoding: "utf8" },
+    );
+
+    assert.equal(result.status, 0, result.stderr);
+    assert.match(result.stdout, /run: executed T-exec/);
+    assert.match(result.stdout, /phase: review/);
+    assert.match(
+      readFileSync(join(root, ".ai", "runs", "T-exec", "stdout.log"), "utf8"),
+      /executor cli ok/,
+    );
+    assert.match(readFileSync(join(root, ".ai", "run-history.yaml"), "utf8"), /review/);
+    assert.match(readFileSync(join(root, ".ai", "task-queue.yaml"), "utf8"), /review/);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
